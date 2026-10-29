@@ -10,11 +10,14 @@ _RELEASE = re.compile(r"\b(introducing|launch(?:ed|es)?|releas(?:ed|es)?|new|nex
 _API = re.compile(r"\b(api|sdk|endpoint|developer platform|console)\b", re.I)
 _API_CHANGE = re.compile(r"\b(new|update|introducing|launch|release|improv|capabilit|token|pricing)\w*\b", re.I)
 _RESEARCH = re.compile(r"\b(research|paper|study|breakthrough|benchmark|science|scientific|reasoning|safety|alignment|interpretability)\b", re.I)
+_PRODUCT = re.compile(r"\b(chatgpt|claude|gemini|deepseek)\s+(?:app|desktop|mobile|voice|search)\b|\b(?:app|desktop|mobile|voice|search)\s+(?:update|release|launch)\b", re.I)
 
 
 def classify(title: str, summary: str, default: str) -> str:
     if _API.search(title) and _API_CHANGE.search(title):
         return "api_update"
+    if _PRODUCT.search(title) and _RELEASE.search(title):
+        return "product_update"
     if _MODEL.search(title) and _RELEASE.search(title):
         return "model_release"
     if _RESEARCH.search(title):

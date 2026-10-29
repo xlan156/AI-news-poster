@@ -5,8 +5,28 @@ max_article_age_hours = 48
 notifications_enabled = true
 
 [notifications]
-categories = ["model_release", "research", "api_update"]
+categories = ["model_release", "research", "api_update", "product_update"]
 exclude_keywords = ["partnership", "partner", "hiring", "careers", "recruitment", "sponsorship", "conference", "event"]
+
+[llm]
+mode = "disabled"
+provider = "openrouter"
+model = "openrouter/free"
+api_key_ref = "env:OPENROUTER_API_KEY"
+request_timeout = 20.0
+max_articles_per_day = 20
+max_requests_per_day = 30
+max_input_tokens = 4000
+max_output_tokens = 1000
+max_retries = 2
+batch_size = 3
+cache_enabled = true
+
+[news_filter]
+min_relevance_score = 60
+min_importance_score = 65
+language = "zh-CN"
+translate_titles = true
 
 [[sources]]
 name = "OpenAI News"

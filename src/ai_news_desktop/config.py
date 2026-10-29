@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .models import validate_url
 
-CATEGORIES = frozenset({"research", "model_release", "api_update", "company_news"})
+CATEGORIES = frozenset({"research", "model_release", "api_update", "product_update", "company_news"})
 
 
 @dataclass(frozen=True)
@@ -36,8 +36,38 @@ class Config:
     max_notifications_per_cycle: int = 3
     max_article_age_hours: int = 48
     notifications_enabled: bool = True
-    notification_categories: tuple[str, ...] = ("model_release", "research", "api_update")
+    notification_categories: tuple[str, ...] = ("model_release", "research", "api_update", "product_update")
     exclude_keywords: tuple[str, ...] = ("partnership", "partner", "hiring", "careers", "recruitment", "sponsorship")
+    llm: "LLMConfig" = None
+    news_filter: "NewsFilterConfig" = None
+
+
+@dataclass(frozen=True)
+class LLMConfig:
+    mode: str = "disabled"
+    provider: str = "openrouter"
+    model: str = "openrouter/free"
+    api_key_ref: str = "env:OPENROUTER_API_KEY"
+    base_url: str = ""
+    request_timeout: float = 20.0
+    max_articles_per_day: int = 20
+    max_requests_per_day: int = 30
+    max_input_tokens: int = 4000
+    max_output_tokens: int = 1000
+    monthly_budget_usd: float | None = None
+    input_usd_per_million: float | None = None
+    output_usd_per_million: float | None = None
+    max_retries: int = 2
+    batch_size: int = 3
+    cache_enabled: bool = True
+
+
+@dataclass(frozen=True)
+class NewsFilterConfig:
+    min_relevance_score: int = 60
+    min_importance_score: int = 65
+    language: str = "zh-CN"
+    translate_titles: bool = True
 
 
 def load_config(path: Path | None = None) -> Config:
@@ -99,7 +129,38 @@ def load_config(path: Path | None = None) -> Config:
         raise ValueError("invalid notification categories")
     if not isinstance(excluded, list) or not all(isinstance(value, str) for value in excluded):
         raise ValueError("invalid excluded keywords")
-    return Config(tuple(sources), *(settings.get(key, getattr(Config, key)) for key in integer_names), enabled, tuple(categories), tuple(excluded))
+    llm_raw = raw.get("llm", {})
+    filter_raw = raw.get("news_filter", {})
+    if not isinstance(llm_raw, dict) or not isinstance(filter_raw, dict):
+        raise ValueError("llm and news_filter must be tables")
+    llm_fields = LLMConfig.__dataclass_fields__
+    filter_fields = NewsFilterConfig.__dataclass_fields__
+    if set(llm_raw) - set(llm_fields) or set(filter_raw) - set(filter_fields):
+        raise ValueError("unknown LLM or news_filter setting")
+    llm = LLMConfig(**llm_raw)
+    news_filter = NewsFilterConfig(**filter_raw)
+    if llm.mode not in {"disabled", "free", "byok"} or llm.provider not in {"openai", "anthropic", "deepseek", "gemini", "groq", "openrouter", "compatible"}:
+        raise ValueError("invalid LLM mode or provider")
+    if llm.mode == "free" and llm.provider not in {"gemini", "groq", "openrouter"}:
+        raise ValueError("free mode requires gemini, groq, or openrouter")
+    if not llm.model or not llm.api_key_ref.startswith(("env:", "keyring:")) or (llm.base_url and not llm.base_url.startswith("https://")):
+        raise ValueError("invalid LLM model, API key reference, or base URL")
+    if llm.mode == "free" and llm.provider == "openrouter" and llm.model != "openrouter/free" and not llm.model.endswith(":free"):
+        raise ValueError("OpenRouter free mode requires openrouter/free or a :free model")
+    for name in ("max_articles_per_day", "max_requests_per_day", "max_input_tokens", "max_output_tokens", "batch_size"):
+        if type(getattr(llm, name)) is not int or getattr(llm, name) < 1:
+            raise ValueError(f"{name} must be positive")
+    if type(llm.max_retries) is not int or llm.max_retries < 0 or llm.max_retries > 5 or not isinstance(llm.request_timeout, (int, float)) or llm.request_timeout <= 0:
+        raise ValueError("invalid LLM retry or timeout setting")
+    for name in ("monthly_budget_usd", "input_usd_per_million", "output_usd_per_million"):
+        value = getattr(llm, name)
+        if value is not None and (not isinstance(value, (int, float)) or value < 0):
+            raise ValueError(f"{name} must be nonnegative")
+    if type(llm.cache_enabled) is not bool or type(news_filter.translate_titles) is not bool or news_filter.language != "zh-CN":
+        raise ValueError("invalid cache or language setting")
+    if any(type(getattr(news_filter, name)) is not int or not 0 <= getattr(news_filter, name) <= 100 for name in ("min_relevance_score", "min_importance_score")):
+        raise ValueError("news_filter scores must be 0–100")
+    return Config(tuple(sources), *(settings.get(key, getattr(Config, key)) for key in integer_names), enabled, tuple(categories), tuple(excluded), llm, news_filter)
 
 
 def default_db_path() -> Path:

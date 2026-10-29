@@ -8,6 +8,7 @@ from threading import Event
 from typing import Callable
 
 from .config import Config
+from .analysis import Analyzer
 from .ingestion import FeedFetcher
 from .notifications import NotificationService
 from .priorities import should_notify
@@ -47,7 +48,16 @@ def refresh(
 
     if notify and config.notifications_enabled and config.max_notifications_per_cycle:
         since = datetime.now(timezone.utc) - timedelta(hours=config.max_article_age_hours)
-        pending = [item for item in store.pending(since, 10000) if should_notify(item, config)][:config.max_notifications_per_cycle]
+        candidates = [item for item in store.pending(since, 10000) if should_notify(item, config)]
+        analyzer = Analyzer(config, store)
+        analyses = analyzer.analyze(candidates[:max(config.max_notifications_per_cycle * 3, 10)])
+        pending = [(item, analyzer.selected(item, analyses.get(item.id))) for item in candidates]
+        pending = [(original, selected) for original, selected in pending if selected]
+        order = {"model_release": 0, "research": 1, "api_update": 2, "product_update": 3, "company_news": 4}
+        pending.sort(key=lambda pair: (order.get(pair[1].category, 4),
+                                       -(analyses[pair[0].id].importance_score if pair[0].id in analyses else 0),
+                                       -pair[0].published_at.timestamp()))
+        pending = pending[:config.max_notifications_per_cycle]
         if pending:
             try:
                 if notifier_factory is None:
@@ -57,10 +67,10 @@ def refresh(
             except Exception as exc:
                 logger.error("Notification backend unavailable: %s", exc)
                 return RefreshResult(ok, failed, added, 0)
-            for index, item in enumerate(pending):
+            for index, (original, item) in enumerate(pending):
                 try:
                     notifier.send(item)
-                    store.mark_notified(item.id)
+                    store.mark_notified(original.id)
                     sent += 1
                 except Exception as exc:
                     logger.error("Notification failed for %s: %s", item.id, exc)

@@ -45,5 +45,5 @@ class NewsItem:
             raise ValueError("published_at must be a timezone-aware datetime")
         if not isinstance(self.organization, str) or (self.organization and not self.organization.strip()):
             raise ValueError("organization must be a string")
-        if self.category not in {"research", "model_release", "api_update", "company_news"}:
+        if self.category not in {"research", "model_release", "api_update", "product_update", "company_news"}:
             raise ValueError("invalid news category")

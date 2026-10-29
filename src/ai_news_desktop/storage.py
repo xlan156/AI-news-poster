@@ -32,6 +32,16 @@ class Store:
             );
             CREATE TABLE IF NOT EXISTS initialized_feeds (url TEXT PRIMARY KEY);
             CREATE INDEX IF NOT EXISTS articles_pending ON articles(status, published_at);
+            CREATE TABLE IF NOT EXISTS llm_cache (
+                cache_key TEXT PRIMARY KEY, analysis_json TEXT NOT NULL, created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS llm_usage (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, provider TEXT NOT NULL, model TEXT NOT NULL,
+                requested_at TEXT NOT NULL, input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL,
+                estimated_cost_usd REAL, status TEXT NOT NULL, article_count INTEGER NOT NULL,
+                article_keys TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS llm_usage_requested ON llm_usage(requested_at);
         """)
         columns = {row[1] for row in self.db.execute("PRAGMA table_info(articles)")}
         for name, definition in (("organization", "TEXT NOT NULL DEFAULT ''"), ("category", "TEXT NOT NULL DEFAULT 'company_news'"), ("dedupe_key", "TEXT")):
@@ -75,7 +85,7 @@ class Store:
         rows = self.db.execute(
             """SELECT id, title, summary, source, organization, category, canonical_url, published_at
                FROM articles WHERE status = 'pending' AND published_at >= ?
-               ORDER BY CASE category WHEN 'model_release' THEN 0 WHEN 'research' THEN 1 WHEN 'api_update' THEN 2 ELSE 3 END,
+               ORDER BY CASE category WHEN 'model_release' THEN 0 WHEN 'research' THEN 1 WHEN 'api_update' THEN 2 WHEN 'product_update' THEN 3 ELSE 4 END,
                         published_at DESC LIMIT ?""",
             (since.astimezone(timezone.utc).isoformat(), limit),
         ).fetchall()
@@ -95,3 +105,42 @@ class Store:
 
     def count(self) -> int:
         return self.db.execute("SELECT COUNT(*) FROM articles").fetchone()[0]
+
+    def cache_get(self, key: str) -> str | None:
+        row = self.db.execute("SELECT analysis_json FROM llm_cache WHERE cache_key = ?", (key,)).fetchone()
+        return row[0] if row else None
+
+    def cache_put_many(self, entries: dict[str, str]) -> None:
+        stamp = datetime.now(timezone.utc).isoformat()
+        with self.db:
+            self.db.executemany("INSERT OR REPLACE INTO llm_cache VALUES (?, ?, ?)", ((key, value, stamp) for key, value in entries.items()))
+
+    def usage_record(self, provider: str, model: str, input_tokens: int, output_tokens: int,
+                     estimated_cost_usd: float | None, status: str, article_keys: list[str]) -> None:
+        import json
+        with self.db:
+            self.db.execute("""INSERT INTO llm_usage
+                (provider, model, requested_at, input_tokens, output_tokens, estimated_cost_usd, status, article_count, article_keys)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (provider, model, datetime.now(timezone.utc).isoformat(), input_tokens, output_tokens,
+                 estimated_cost_usd, status, len(article_keys), json.dumps(article_keys)))
+
+    def usage_summary(self, provider: str | None = None, model: str | None = None) -> dict:
+        from datetime import date
+        import json
+        now = datetime.now(timezone.utc)
+        month = now.strftime("%Y-%m-")
+        day = now.date().isoformat()
+        rows = self.db.execute("SELECT * FROM llm_usage WHERE (? IS NULL OR provider = ?) AND (? IS NULL OR model = ?)",
+                               (provider, provider, model, model)).fetchall()
+        today = [row for row in rows if row["requested_at"].startswith(day)]
+        monthly = [row for row in rows if row["requested_at"].startswith(month)]
+        article_keys = set()
+        for row in today:
+            article_keys.update(json.loads(row["article_keys"]))
+        return {"requests_today": len(today), "articles_today": len(article_keys),
+                "article_keys_today": article_keys,
+                "input_tokens_today": sum(row["input_tokens"] for row in today),
+                "output_tokens_today": sum(row["output_tokens"] for row in today),
+                "estimated_cost_month_usd": sum(row["estimated_cost_usd"] or 0 for row in monthly),
+                "unpriced_month_requests": sum(row["estimated_cost_usd"] is None for row in monthly)}
