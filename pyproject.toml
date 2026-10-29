@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ai-news-desktop"
-version = "0.2.0"
+version = "0.2.1"
 description = "A lightweight Windows AI news feed and toast notification agent"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -18,4 +18,4 @@ dependencies = [
 where = ["src"]
 
 [tool.setuptools.package-data]
-ai_news_desktop = ["data/*.json"]
+ai_news_desktop = ["data/*.json", "data/*.toml"]

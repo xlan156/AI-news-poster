@@ -1,0 +1,47 @@
+[settings]
+refresh_minutes = 60
+max_notifications_per_cycle = 3
+max_article_age_hours = 48
+notifications_enabled = true
+
+[notifications]
+categories = ["model_release", "research", "api_update"]
+exclude_keywords = ["partnership", "partner", "hiring", "careers", "recruitment", "sponsorship", "conference", "event"]
+
+[[sources]]
+name = "OpenAI News"
+organization = "OpenAI"
+type = "rss"
+url = "https://openai.com/news/rss.xml"
+enabled = true
+category = "company_news"
+
+[[sources]]
+name = "Anthropic Newsroom"
+organization = "Anthropic"
+type = "webpage"
+url = "https://www.anthropic.com/news"
+enabled = true
+category = "company_news"
+card_tag = "li"
+card_attribute = "data-listing-row"
+link_prefix = "/news/"
+
+[[sources]]
+name = "DeepSeek Research & News"
+organization = "DeepSeek"
+type = "webpage"
+url = "https://www.deepseek.com/en/news/"
+enabled = true
+category = "company_news"
+card_tag = "a"
+card_classes = ["ds-news-hero-card", "ds-news-list-item"]
+link_prefix = "/en/news/"
+
+[[sources]]
+name = "Google DeepMind Blog"
+organization = "Google DeepMind"
+type = "rss"
+url = "https://deepmind.google/blog/rss.xml"
+enabled = true
+category = "research"

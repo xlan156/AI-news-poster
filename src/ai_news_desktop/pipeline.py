@@ -10,6 +10,7 @@ from typing import Callable
 from .config import Config
 from .ingestion import FeedFetcher
 from .notifications import NotificationService
+from .priorities import should_notify
 from .storage import Store
 
 logger = logging.getLogger(__name__)
@@ -46,7 +47,7 @@ def refresh(
 
     if notify and config.notifications_enabled and config.max_notifications_per_cycle:
         since = datetime.now(timezone.utc) - timedelta(hours=config.max_article_age_hours)
-        pending = store.pending(since, config.max_notifications_per_cycle)
+        pending = [item for item in store.pending(since, 10000) if should_notify(item, config)][:config.max_notifications_per_cycle]
         if pending:
             try:
                 if notifier_factory is None:

@@ -1,6 +1,8 @@
 """SQLite persistence and notification state."""
 
 import sqlite3
+import hashlib
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -19,6 +21,9 @@ class Store:
                 title TEXT NOT NULL,
                 summary TEXT NOT NULL,
                 source TEXT NOT NULL,
+                organization TEXT NOT NULL DEFAULT '',
+                category TEXT NOT NULL DEFAULT 'company_news',
+                dedupe_key TEXT,
                 canonical_url TEXT NOT NULL UNIQUE,
                 published_at TEXT NOT NULL,
                 first_seen_at TEXT NOT NULL,
@@ -28,6 +33,11 @@ class Store:
             CREATE TABLE IF NOT EXISTS initialized_feeds (url TEXT PRIMARY KEY);
             CREATE INDEX IF NOT EXISTS articles_pending ON articles(status, published_at);
         """)
+        columns = {row[1] for row in self.db.execute("PRAGMA table_info(articles)")}
+        for name, definition in (("organization", "TEXT NOT NULL DEFAULT ''"), ("category", "TEXT NOT NULL DEFAULT 'company_news'"), ("dedupe_key", "TEXT")):
+            if name not in columns:
+                self.db.execute(f"ALTER TABLE articles ADD COLUMN {name} {definition}")
+        self.db.execute("CREATE UNIQUE INDEX IF NOT EXISTS articles_dedupe_key ON articles(dedupe_key) WHERE dedupe_key IS NOT NULL")
 
     def close(self) -> None:
         self.db.close()
@@ -43,9 +53,10 @@ class Store:
             for item in items:
                 cursor = self.db.execute(
                     """INSERT OR IGNORE INTO articles
-                       (id, title, summary, source, canonical_url, published_at, first_seen_at, status)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (item.id, item.title, item.summary, item.source, item.url,
+                       (id, title, summary, source, organization, category, dedupe_key, canonical_url, published_at, first_seen_at, status)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (item.id, item.title, item.summary, item.source, item.organization or item.source,
+                     item.category, self._dedupe_key(item), item.url,
                      item.published_at.astimezone(timezone.utc).isoformat(), seen,
                      "baseline" if baseline else "pending"),
                 )
@@ -53,14 +64,22 @@ class Store:
             self.db.execute("INSERT OR IGNORE INTO initialized_feeds(url) VALUES (?)", (feed_url,))
         return added
 
+    @staticmethod
+    def _dedupe_key(item: NewsItem) -> str:
+        title = re.sub(r"[^\w]+", "", item.title.casefold())
+        organization = re.sub(r"[^\w]+", "", (item.organization or item.source).casefold())
+        day = item.published_at.astimezone(timezone.utc).date().isoformat()
+        return hashlib.sha256(f"{organization}|{title}|{day}".encode("utf-8")).hexdigest()
+
     def pending(self, since: datetime, limit: int) -> list[NewsItem]:
         rows = self.db.execute(
-            """SELECT id, title, summary, source, canonical_url, published_at
+            """SELECT id, title, summary, source, organization, category, canonical_url, published_at
                FROM articles WHERE status = 'pending' AND published_at >= ?
-               ORDER BY first_seen_at, published_at DESC LIMIT ?""",
+               ORDER BY CASE category WHEN 'model_release' THEN 0 WHEN 'research' THEN 1 WHEN 'api_update' THEN 2 ELSE 3 END,
+                        published_at DESC LIMIT ?""",
             (since.astimezone(timezone.utc).isoformat(), limit),
         ).fetchall()
-        return [NewsItem(row["id"], row["title"], row["summary"], row["source"], row["canonical_url"], datetime.fromisoformat(row["published_at"])) for row in rows]
+        return [NewsItem(row["id"], row["title"], row["summary"], row["source"], row["canonical_url"], datetime.fromisoformat(row["published_at"]), row["organization"], row["category"]) for row in rows]
 
     def mark_notified(self, article_id: str) -> None:
         with self.db:
