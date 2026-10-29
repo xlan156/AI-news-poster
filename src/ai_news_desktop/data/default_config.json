@@ -1,0 +1,12 @@
+{
+  "feeds": [
+    {"name": "Hugging Face Blog", "url": "https://huggingface.co/blog/feed.xml", "enabled": true},
+    {"name": "Google Research", "url": "https://research.google/blog/rss/", "enabled": true},
+    {"name": "arXiv cs.AI", "url": "https://rss.arxiv.org/rss/cs.AI", "enabled": true},
+    {"name": "arXiv cs.LG", "url": "https://rss.arxiv.org/atom/cs.LG", "enabled": true}
+  ],
+  "refresh_minutes": 60,
+  "max_notifications_per_cycle": 3,
+  "max_article_age_hours": 48,
+  "notifications_enabled": true
+}

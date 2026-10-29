@@ -1,0 +1,26 @@
+[
+  {
+    "id": "arxiv-general-agentbench-2602-18998",
+    "title": "Researchers evaluate test-time scaling of general LLM agents",
+    "summary": "The preprint introduces a benchmark spanning search, coding, reasoning, and tool use.",
+    "source": "arXiv",
+    "url": "https://arxiv.org/abs/2602.18998",
+    "published_at": "2026-02-22T01:08:02+00:00"
+  },
+  {
+    "id": "deepmind-gemini-deep-think-science",
+    "title": "Gemini Deep Think tackles scientific research problems",
+    "summary": "Google DeepMind describes work on mathematics, physics, and computer science research tasks.",
+    "source": "Google DeepMind",
+    "url": "https://deepmind.google/blog/accelerating-mathematical-and-scientific-discovery-with-gemini-deep-think/",
+    "published_at": "2026-02-11T00:00:00+00:00"
+  },
+  {
+    "id": "github-openai-agents-python-0240",
+    "title": "OpenAI Agents Python releases version 0.24.0",
+    "summary": "The SDK release adds MCP annotation support and improves tool exception formatting.",
+    "source": "GitHub Releases",
+    "url": "https://github.com/openai/openai-agents-python/releases/tag/v0.24.0",
+    "published_at": "2026-10-15T02:20:00+00:00"
+  }
+]
