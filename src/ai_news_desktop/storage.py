@@ -42,6 +42,7 @@ class Store:
                 article_keys TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS llm_usage_requested ON llm_usage(requested_at);
+            CREATE TABLE IF NOT EXISTS article_read (article_id TEXT PRIMARY KEY, read_at TEXT NOT NULL);
         """)
         columns = {row[1] for row in self.db.execute("PRAGMA table_info(articles)")}
         for name, definition in (("organization", "TEXT NOT NULL DEFAULT ''"), ("category", "TEXT NOT NULL DEFAULT 'company_news'"), ("dedupe_key", "TEXT")):
@@ -100,8 +101,48 @@ class Store:
 
     def latest(self, limit: int = 20) -> list[sqlite3.Row]:
         return self.db.execute(
-            "SELECT * FROM articles ORDER BY published_at DESC LIMIT ?", (limit,)
+            "SELECT articles.*, article_read.read_at FROM articles LEFT JOIN article_read ON articles.id = article_read.article_id ORDER BY published_at DESC LIMIT ?", (limit,)
         ).fetchall()
+
+    def search_news(self, search: str = "", organization: str = "all", category: str = "all",
+                    sort: str = "newest", limit: int = 100, offset: int = 0) -> tuple[list[sqlite3.Row], int]:
+        source_name = "COALESCE(NULLIF(articles.organization, ''), NULLIF(articles.source, ''), '未知来源')"
+        display_category = "CASE WHEN articles.category = 'company_news' AND articles.source LIKE 'arXiv%' THEN 'research' ELSE articles.category END"
+        conditions = []
+        args: list[str] = []
+        if organization != "all":
+            conditions.append(f"{source_name} = ?")
+            args.append(organization)
+        if category != "all":
+            conditions.append(f"{display_category} = ?")
+            args.append(category)
+        if search.strip():
+            term = "%" + search.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+            conditions.append(f"(articles.title LIKE ? ESCAPE '\\' OR articles.summary LIKE ? ESCAPE '\\' OR {source_name} LIKE ? ESCAPE '\\')")
+            args.extend((term, term, term))
+        where = " WHERE " + " AND ".join(conditions) if conditions else ""
+        total = self.db.execute("SELECT COUNT(*) FROM articles" + where, args).fetchone()[0]
+        order = "ASC" if sort == "oldest" else "DESC"
+        rows = self.db.execute(
+            "SELECT articles.*, article_read.read_at FROM articles "
+            "LEFT JOIN article_read ON articles.id = article_read.article_id" + where +
+            f" ORDER BY articles.published_at {order}, articles.id {order} LIMIT ? OFFSET ?",
+            (*args, limit, offset),
+        ).fetchall()
+        return rows, total
+
+    def organizations(self) -> list[str]:
+        return [row[0] for row in self.db.execute(
+            "SELECT DISTINCT COALESCE(NULLIF(organization, ''), NULLIF(source, ''), '未知来源') AS name "
+            "FROM articles ORDER BY name COLLATE NOCASE"
+        )]
+
+    def set_read(self, article_id: str, read: bool) -> None:
+        with self.db:
+            if read:
+                self.db.execute("INSERT OR REPLACE INTO article_read VALUES (?, ?)", (article_id, datetime.now(timezone.utc).isoformat()))
+            else:
+                self.db.execute("DELETE FROM article_read WHERE article_id = ?", (article_id,))
 
     def count(self) -> int:
         return self.db.execute("SELECT COUNT(*) FROM articles").fetchone()[0]

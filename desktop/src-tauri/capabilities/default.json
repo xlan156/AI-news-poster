@@ -1,0 +1,1 @@
+{"identifier":"default","description":"Desktop application capabilities","windows":["main"],"permissions":["core:default","opener:default"]}

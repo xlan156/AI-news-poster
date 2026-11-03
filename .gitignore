@@ -19,4 +19,12 @@ venv/
 *.log
 Thumbs.db
 Desktop.ini
+desktop/node_modules/
+desktop/.pnpm-store/
+desktop/dist/
+desktop/src-tauri/target/
+desktop/src-tauri/service/*.exe
+.pytest-tmp/
+.cargo-home/
+ai-news-service.spec
 $RECYCLE.BIN/
