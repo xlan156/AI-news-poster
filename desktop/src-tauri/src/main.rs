@@ -60,9 +60,21 @@ fn spawn_backend(app: &tauri::App) -> Result<Process, String> {
 
 #[tauri::command]
 async fn backend_command(state: tauri::State<'_, Backend>, method: String, params: serde_json::Value) -> Result<serde_json::Value, String> {
+    let startup_change = if method == "save_preferences" { params.get("patch").and_then(|p| p.get("start_at_login")).and_then(|v| v.as_bool()) } else { None };
     let process = state.process.clone();
     let result = tauri::async_runtime::spawn_blocking(move || process.lock().map_err(|e| e.to_string())?.call(&method, params))
         .await.map_err(|e| e.to_string())??;
+    if let Some(enabled) = startup_change {
+        if let Err(error) = set_start_at_login(enabled) {
+            let process = state.process.clone();
+            let _ = tauri::async_runtime::spawn_blocking(move || {
+                if let Ok(mut guard) = process.lock() {
+                    let _ = guard.call("save_preferences", serde_json::json!({"patch":{"start_at_login":!enabled}}));
+                }
+            }).await;
+            return Err(format!("Could not update Windows startup: {error}"));
+        }
+    }
     if let Some(preferences) = result.get("config").and_then(|c| c.get("preferences")) {
         if let Some(value) = preferences.get("minimize_to_tray").and_then(|v| v.as_bool()) {
             state.tray_on_close.store(value, Ordering::Relaxed);
@@ -82,10 +94,40 @@ fn tray_call(app: &tauri::AppHandle, method: &str, params: serde_json::Value) {
     });
 }
 
+#[cfg(windows)]
+fn set_start_at_login(enabled: bool) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    const HIDDEN: u32 = 0x08000000;
+    const RUN_KEY: &str = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+    let path = std::env::current_exe().map_err(|e| e.to_string())?;
+    let command_line = format!("\"{}\" --minimized", path.display());
+    if !enabled {
+        let present = Command::new("reg.exe").args(["query", RUN_KEY, "/v", "AI News Desktop"])
+            .creation_flags(HIDDEN).output().map_err(|e| e.to_string())?;
+        if !present.status.success() { return Ok(()); }
+    }
+    let mut command = Command::new("reg.exe");
+    if enabled {
+        command.args(["add", RUN_KEY,
+            "/v", "AI News Desktop", "/t", "REG_SZ", "/d", &command_line, "/f"]);
+    } else {
+        command.args(["delete", RUN_KEY,
+            "/v", "AI News Desktop", "/f"]);
+    }
+    let result = command.creation_flags(HIDDEN).output().map_err(|e| e.to_string())?;
+    if !result.status.success() { return Err(String::from_utf8_lossy(&result.stderr).into_owned()); }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn set_start_at_login(_enabled: bool) -> Result<(), String> { Ok(()) }
+
 fn main() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
-            if let Some(window) = app.get_webview_window("main") { let _ = window.show(); let _ = window.set_focus(); }
+        .plugin(tauri_plugin_single_instance::init(|app, args, _| {
+            if !args.iter().any(|arg| arg == "--minimized") {
+                if let Some(window) = app.get_webview_window("main") { let _ = window.show(); let _ = window.set_focus(); }
+            }
         }))
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![backend_command])
@@ -98,7 +140,7 @@ fn main() {
                     if let Some(value) = prefs["minimize_to_tray"].as_bool() {
                         app.state::<Backend>().tray_on_close.store(value, Ordering::Relaxed);
                     }
-                    if prefs["start_minimized"].as_bool() == Some(true) {
+                    if std::env::args().any(|arg| arg == "--minimized") || prefs["start_minimized"].as_bool() == Some(true) {
                         if let Some(window) = app.get_webview_window("main") { let _ = window.hide(); }
                     }
                 }

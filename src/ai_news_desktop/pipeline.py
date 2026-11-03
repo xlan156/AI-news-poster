@@ -39,16 +39,23 @@ def refresh(
         try:
             items = fetcher.fetch(feed)
             added_here = store.save_feed(feed.url, items)
+            store.set_source_status(feed.url, "ok", added_here)
             logger.info("%s: %d entries, %d new", feed.name, len(items), added_here)
             added += added_here
             ok += 1
         except Exception as exc:
             logger.warning("Feed failed (%s): %s", feed.name, exc)
+            store.set_source_status(feed.url, "error", error=str(exc))
             failed += 1
 
     if notify and config.notifications_enabled and config.max_notifications_per_cycle:
         since = datetime.now(timezone.utc) - timedelta(hours=config.max_article_age_hours)
-        candidates = [item for item in store.pending(since, 10000) if should_notify(item, config)]
+        enabled_sources = {feed.name for feed in config.feeds if feed.enabled}
+        candidates = [item for item in store.pending(since, 10000)
+                      if (not config.feeds or item.source in enabled_sources)
+                      and (config.research_notifications or not item.source.lower().startswith("arxiv"))
+                      and (not config.notification_sources or item.source in config.notification_sources)
+                      and should_notify(item, config)]
         analyzer = Analyzer(config, store)
         analyses = analyzer.analyze(candidates[:max(config.max_notifications_per_cycle * 3, 10)])
         pending = [(item, analyzer.selected(item, analyses.get(item.id))) for item in candidates]
@@ -67,6 +74,15 @@ def refresh(
             except Exception as exc:
                 logger.error("Notification backend unavailable: %s", exc)
                 return RefreshResult(ok, failed, added, 0)
+            if len(pending) > 1 and getattr(notifier, "supports_grouping", False) is True:
+                try:
+                    notifier.send_group([item for _, item in pending])
+                    for original, _ in pending:
+                        store.mark_notified(original.id)
+                    sent = len(pending)
+                except Exception as exc:
+                    logger.error("Grouped notification failed: %s", exc)
+                return RefreshResult(ok, failed, added, sent)
             for index, (original, item) in enumerate(pending):
                 try:
                     notifier.send(item)

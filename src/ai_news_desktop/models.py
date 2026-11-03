@@ -34,6 +34,7 @@ class NewsItem:
     published_at: datetime
     organization: str = ""
     category: str = "company_news"
+    updated_at: datetime | None = None
 
     def __post_init__(self) -> None:
         for field in ("id", "title", "summary", "source"):
@@ -43,6 +44,8 @@ class NewsItem:
         validate_url(self.url)
         if not isinstance(self.published_at, datetime) or self.published_at.tzinfo is None:
             raise ValueError("published_at must be a timezone-aware datetime")
+        if self.updated_at is not None and (not isinstance(self.updated_at, datetime) or self.updated_at.tzinfo is None):
+            raise ValueError("updated_at must be a timezone-aware datetime")
         if not isinstance(self.organization, str) or (self.organization and not self.organization.strip()):
             raise ValueError("organization must be a string")
         if self.category not in {"research", "model_release", "api_update", "product_update", "company_news"}:

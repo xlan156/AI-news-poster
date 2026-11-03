@@ -24,6 +24,7 @@ class Feed:
     card_attribute: str = ""
     card_classes: tuple[str, ...] = ()
     link_prefix: str = ""
+    official_authors: tuple[str, ...] = ()
 
 
 Source = Feed
@@ -36,7 +37,12 @@ class Config:
     max_notifications_per_cycle: int = 3
     max_article_age_hours: int = 48
     notifications_enabled: bool = True
-    notification_categories: tuple[str, ...] = ("model_release", "research", "api_update", "product_update")
+    home_source_quota: int = 3
+    default_view: str = "official"
+    default_sort: str = "recommended"
+    notification_sources: tuple[str, ...] = ()
+    research_notifications: bool = False
+    notification_categories: tuple[str, ...] = ("model_release", "research", "api_update", "product_update", "company_news")
     exclude_keywords: tuple[str, ...] = ("partnership", "partner", "hiring", "careers", "recruitment", "sponsorship")
     llm: "LLMConfig" = None
     news_filter: "NewsFilterConfig" = None
@@ -98,6 +104,9 @@ def load_config(path: Path | None = None) -> Config:
         if not isinstance(source_type, str) or not isinstance(category, str) or source_type not in {"rss", "atom", "webpage"} or category not in CATEGORIES:
             raise ValueError(f"invalid type or category for {value['name']}")
         classes = value.get("card_classes", [])
+        authors = value.get("official_authors", [])
+        if not isinstance(authors, list) or not all(isinstance(part, str) and part.strip() for part in authors):
+            raise ValueError("official_authors must be an array of names")
         if not isinstance(classes, list) or not all(isinstance(part, str) for part in classes):
             raise ValueError("card_classes must be an array of strings")
         if source_type == "webpage" and (not value.get("card_tag") or not (value.get("card_attribute") or classes) or not value.get("link_prefix")):
@@ -105,14 +114,14 @@ def load_config(path: Path | None = None) -> Config:
         sources.append(Feed(
             value["name"], validate_url(value.get("url")), value.get("enabled", True),
             organization, source_type, category,
-            value.get("card_tag", ""), value.get("card_attribute", ""), tuple(classes), value.get("link_prefix", ""),
+            value.get("card_tag", ""), value.get("card_attribute", ""), tuple(classes), value.get("link_prefix", ""), tuple(authors),
         ))
     if len({source.url for source in sources}) != len(sources):
         raise ValueError("source URLs must be unique")
     settings = raw.get("settings", raw)
     if not isinstance(settings, dict):
         raise ValueError("settings must be a table")
-    integer_names = ("refresh_minutes", "max_notifications_per_cycle", "max_article_age_hours")
+    integer_names = ("refresh_minutes", "max_notifications_per_cycle", "max_article_age_hours", "home_source_quota")
     for key in integer_names:
         value = settings.get(key, getattr(Config, key))
         if type(value) is not int or value < (0 if key == "max_notifications_per_cycle" else 1):
@@ -120,11 +129,17 @@ def load_config(path: Path | None = None) -> Config:
     enabled = settings.get("notifications_enabled", True)
     if type(enabled) is not bool:
         raise ValueError("notifications_enabled must be boolean")
+    if settings.get("default_view", "official") not in {"official", "research", "history"} or settings.get("default_sort", "recommended") not in {"recommended", "newest"}:
+        raise ValueError("invalid default view or sort")
     preferences = raw.get("notifications", {})
     if not isinstance(preferences, dict):
         raise ValueError("notifications must be a table")
     categories = preferences.get("categories", list(Config.notification_categories))
     excluded = preferences.get("exclude_keywords", list(Config.exclude_keywords))
+    notification_sources = preferences.get("sources", [])
+    research_notifications = preferences.get("research", False)
+    if not isinstance(notification_sources, list) or not all(isinstance(value, str) for value in notification_sources) or type(research_notifications) is not bool:
+        raise ValueError("invalid notification source preferences")
     if not isinstance(categories, list) or any(value not in CATEGORIES for value in categories):
         raise ValueError("invalid notification categories")
     if not isinstance(excluded, list) or not all(isinstance(value, str) for value in excluded):
@@ -160,7 +175,13 @@ def load_config(path: Path | None = None) -> Config:
         raise ValueError("invalid cache or language setting")
     if any(type(getattr(news_filter, name)) is not int or not 0 <= getattr(news_filter, name) <= 100 for name in ("min_relevance_score", "min_importance_score")):
         raise ValueError("news_filter scores must be 0–100")
-    return Config(tuple(sources), *(settings.get(key, getattr(Config, key)) for key in integer_names), enabled, tuple(categories), tuple(excluded), llm, news_filter)
+    return Config(feeds=tuple(sources), refresh_minutes=settings.get("refresh_minutes", 60),
+                  max_notifications_per_cycle=settings.get("max_notifications_per_cycle", 3),
+                  max_article_age_hours=settings.get("max_article_age_hours", 48),
+                  notifications_enabled=enabled, home_source_quota=settings.get("home_source_quota", 3),
+                  default_view=settings.get("default_view", "official"), default_sort=settings.get("default_sort", "recommended"),
+                  notification_sources=tuple(notification_sources), research_notifications=research_notifications,
+                  notification_categories=tuple(categories), exclude_keywords=tuple(excluded), llm=llm, news_filter=news_filter)
 
 
 def default_db_path() -> Path:

@@ -4,3 +4,4 @@
 .test-connection{grid-column:1/-1;display:flex;align-items:center;gap:12px}.test-connection span{font-size:11px;color:var(--muted)}.importance{margin-top:16px;color:var(--accent)!important;font-size:11px!important}
 .add-source{display:flex;gap:9px;padding:16px}.add-source input:first-child{width:180px}.add-source input:nth-child(2){flex:1}
 .pagination{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 2px;color:var(--muted);font-size:11px}.pagination>div{display:flex;gap:8px}
+.feed-views { display: inline-flex; margin-bottom: 16px; }

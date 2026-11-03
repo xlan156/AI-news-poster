@@ -12,8 +12,18 @@ from .models import NewsItem
 class Store:
     def __init__(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
+        existed = path.exists()
         self.db = sqlite3.connect(path)
         self.db.row_factory = sqlite3.Row
+        if existed:
+            old_columns = {row[1] for row in self.db.execute("PRAGMA table_info(articles)")}
+            backup = path.with_suffix(path.suffix + ".pre-phase5.bak")
+            if old_columns and "fetched_at" not in old_columns and not backup.exists():
+                target = sqlite3.connect(backup)
+                try:
+                    self.db.backup(target)
+                finally:
+                    target.close()
         self.db.execute("PRAGMA busy_timeout = 5000")
         self.db.executescript("""
             CREATE TABLE IF NOT EXISTS articles (
@@ -26,6 +36,8 @@ class Store:
                 dedupe_key TEXT,
                 canonical_url TEXT NOT NULL UNIQUE,
                 published_at TEXT NOT NULL,
+                updated_at TEXT,
+                fetched_at TEXT,
                 first_seen_at TEXT NOT NULL,
                 status TEXT NOT NULL CHECK (status IN ('baseline', 'pending', 'notified')),
                 notified_at TEXT
@@ -43,11 +55,16 @@ class Store:
             );
             CREATE INDEX IF NOT EXISTS llm_usage_requested ON llm_usage(requested_at);
             CREATE TABLE IF NOT EXISTS article_read (article_id TEXT PRIMARY KEY, read_at TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS source_status (
+                url TEXT PRIMARY KEY, last_attempt TEXT NOT NULL, last_success TEXT,
+                state TEXT NOT NULL, last_error TEXT NOT NULL DEFAULT '', articles_added INTEGER NOT NULL DEFAULT 0
+            );
         """)
         columns = {row[1] for row in self.db.execute("PRAGMA table_info(articles)")}
-        for name, definition in (("organization", "TEXT NOT NULL DEFAULT ''"), ("category", "TEXT NOT NULL DEFAULT 'company_news'"), ("dedupe_key", "TEXT")):
+        for name, definition in (("organization", "TEXT NOT NULL DEFAULT ''"), ("category", "TEXT NOT NULL DEFAULT 'company_news'"), ("dedupe_key", "TEXT"), ("updated_at", "TEXT"), ("fetched_at", "TEXT")):
             if name not in columns:
                 self.db.execute(f"ALTER TABLE articles ADD COLUMN {name} {definition}")
+        self.db.execute("UPDATE articles SET fetched_at = first_seen_at WHERE fetched_at IS NULL")
         self.db.execute("CREATE UNIQUE INDEX IF NOT EXISTS articles_dedupe_key ON articles(dedupe_key) WHERE dedupe_key IS NOT NULL")
 
     def close(self) -> None:
@@ -64,16 +81,36 @@ class Store:
             for item in items:
                 cursor = self.db.execute(
                     """INSERT OR IGNORE INTO articles
-                       (id, title, summary, source, organization, category, dedupe_key, canonical_url, published_at, first_seen_at, status)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       (id, title, summary, source, organization, category, dedupe_key, canonical_url, published_at, updated_at, fetched_at, first_seen_at, status)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (item.id, item.title, item.summary, item.source, item.organization or item.source,
                      item.category, self._dedupe_key(item), item.url,
-                     item.published_at.astimezone(timezone.utc).isoformat(), seen,
+                     item.published_at.astimezone(timezone.utc).isoformat(),
+                     item.updated_at.astimezone(timezone.utc).isoformat() if item.updated_at else None, seen, seen,
                      "baseline" if baseline else "pending"),
                 )
                 added += cursor.rowcount
+                if not cursor.rowcount and item.updated_at:
+                    revision = item.updated_at.astimezone(timezone.utc).isoformat()
+                    self.db.execute("""UPDATE articles SET updated_at = ?
+                        WHERE (canonical_url = ? OR dedupe_key = ?)
+                        AND (updated_at IS NULL OR updated_at < ?)""",
+                        (revision, item.url, self._dedupe_key(item), revision))
             self.db.execute("INSERT OR IGNORE INTO initialized_feeds(url) VALUES (?)", (feed_url,))
         return added
+
+    def set_source_status(self, url: str, state: str, articles_added: int = 0, error: str = "") -> None:
+        stamp = datetime.now(timezone.utc).isoformat()
+        with self.db:
+            self.db.execute("""INSERT INTO source_status(url,last_attempt,last_success,state,last_error,articles_added)
+                VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(url) DO UPDATE SET
+                last_attempt=excluded.last_attempt,
+                last_success=CASE WHEN excluded.state='ok' THEN excluded.last_success ELSE source_status.last_success END,
+                state=excluded.state,last_error=excluded.last_error,articles_added=excluded.articles_added""",
+                (url, stamp, stamp if state == "ok" else None, state, error[:200], articles_added))
+
+    def source_status(self) -> dict:
+        return {row["url"]: dict(row) for row in self.db.execute("SELECT * FROM source_status")}
 
     @staticmethod
     def _dedupe_key(item: NewsItem) -> str:
@@ -105,11 +142,21 @@ class Store:
         ).fetchall()
 
     def search_news(self, search: str = "", organization: str = "all", category: str = "all",
-                    sort: str = "newest", limit: int = 100, offset: int = 0) -> tuple[list[sqlite3.Row], int]:
+                    sort: str = "newest", limit: int = 100, offset: int = 0,
+                    view: str = "history", enabled_sources: tuple[str, ...] = (), quota: int = 0) -> tuple[list[sqlite3.Row], int]:
         source_name = "COALESCE(NULLIF(articles.organization, ''), NULLIF(articles.source, ''), '未知来源')"
         display_category = "CASE WHEN articles.category = 'company_news' AND articles.source LIKE 'arXiv%' THEN 'research' ELSE articles.category END"
         conditions = []
         args: list[str] = []
+        if view == "official":
+            if enabled_sources:
+                conditions.append("articles.source IN (" + ",".join("?" for _ in enabled_sources) + ")")
+                args.extend(enabled_sources)
+            else:
+                conditions.append("0")
+            conditions.append("articles.source NOT LIKE 'arXiv%'")
+        elif view == "research":
+            conditions.append("articles.source LIKE 'arXiv%'")
         if organization != "all":
             conditions.append(f"{source_name} = ?")
             args.append(organization)
@@ -122,13 +169,33 @@ class Store:
             args.extend((term, term, term))
         where = " WHERE " + " AND ".join(conditions) if conditions else ""
         total = self.db.execute("SELECT COUNT(*) FROM articles" + where, args).fetchone()[0]
-        order = "ASC" if sort == "oldest" else "DESC"
-        rows = self.db.execute(
-            "SELECT articles.*, article_read.read_at FROM articles "
-            "LEFT JOIN article_read ON articles.id = article_read.article_id" + where +
-            f" ORDER BY articles.published_at {order}, articles.id {order} LIMIT ? OFFSET ?",
-            (*args, limit, offset),
-        ).fetchall()
+        if sort == "recommended":
+            importance = "CASE articles.category WHEN 'model_release' THEN 4 WHEN 'api_update' THEN 3 WHEN 'research' THEN 2 WHEN 'product_update' THEN 1 ELSE 0 END"
+            recency = "CAST(MAX(0, 30 - (julianday('now') - julianday(COALESCE(NULLIF(articles.published_at,''),articles.fetched_at)))) AS INTEGER)"
+            ordering = f"({importance} * 7 + COALESCE({recency},0)) DESC, COALESCE(NULLIF(articles.published_at,''),articles.fetched_at) DESC, articles.id DESC"
+        else:
+            direction = "ASC" if sort == "oldest" else "DESC"
+            ordering = f"COALESCE(NULLIF(articles.published_at,''),articles.fetched_at) {direction}, articles.id {direction}"
+        if quota > 0:
+            # Keep every record in storage; cap only the initial home selection.
+            candidates = self.db.execute("SELECT articles.*, article_read.read_at FROM articles LEFT JOIN article_read ON articles.id=article_read.article_id" + where + f" ORDER BY {ordering}", args).fetchall()
+            counts: dict[str, int] = {}
+            buckets: dict[str, list[sqlite3.Row]] = {}
+            for row in candidates:
+                if counts.get(row["source"], 0) < quota:
+                    buckets.setdefault(row["source"], []).append(row)
+                    counts[row["source"]] = counts.get(row["source"], 0) + 1
+            rows = []
+            while len(rows) < limit and any(buckets.values()):
+                for bucket in buckets.values():
+                    if bucket and len(rows) < limit:
+                        rows.append(bucket.pop(0))
+        else:
+            rows = self.db.execute(
+                "SELECT articles.*, article_read.read_at FROM articles "
+                "LEFT JOIN article_read ON articles.id = article_read.article_id" + where +
+                f" ORDER BY {ordering} LIMIT ? OFFSET ?", (*args, limit, offset),
+            ).fetchall()
         return rows, total
 
     def organizations(self) -> list[str]:
