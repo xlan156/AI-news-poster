@@ -20,4 +20,6 @@ TOML 的 `[[sources]]` 必填 `name`、`organization`、`type`、`url`、`enable
 
 每条请求：`{"id": number, "method": string, "params": object}`；响应：`{"id": number, "result": value}` 或 `{"id": number, "error": string}`。方法为 `get_state`、`get_news`、`refresh`、`set_monitoring`、`set_read`、`save_config`、`save_preferences`、`test_connection`。具体请求/响应由 `desktop_service.py` 定义，前端类型在 `desktop/src/api.ts`；新增字段须两端同步。`refresh` 返回状态，状态中的 `last_result` 包含 `feeds_ok`、`feeds_failed`、`articles_added`、`notified`。`source_status` 记录本进程内的来源尝试结果，重启后不保留。
 
+启动流程仍使用相同的 JSON 行协议。Tauri 不在 setup 中等待 `get_state`；前端首次异步请求期间显示加载状态，连接失败时展示错误并可重试。窗口初始可见性和关闭到托盘偏好由 Tauri 直接读取同一份 `preferences.json`，字段名与 Python 服务保持一致。
+
 内部通知边界只有 `NotificationService.send(NewsItem) -> None`。Windows toast 使用标题、摘要前 180 字和原始 URL 作为点击链接。当前没有持久化的通用“通知事件”总线或事件表；若未来需要每日摘要或通知历史，应先明确事件语义和迁移方式，再扩展现有边界。

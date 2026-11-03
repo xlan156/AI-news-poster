@@ -20,6 +20,8 @@ pnpm build
 
 `pnpm build` 包含 TypeScript 检查。前端交互变更可追加有意义的组件测试与开发窗口检查；打包或 Windows 行为变更按 [phase4-desktop.md](phase4-desktop.md) 构建并运行程序。CI 的 `windows-desktop.yml` 已运行 Python 测试并产出 NSIS 安装包，但产出安装包不等于自动完成 Windows 端到端验收。
 
+Windows 启动行为变更还应在 release EXE 中记录冷/热启动到可见加载提示及首页内容的时间，确认后台 service 无控制台窗口、连接失败可重试、最小化启动不显示主窗口，并在正常退出时检查子进程清理。`AI_NEWS_STARTUP_TRACE=1` 可在桌面进程 stderr 输出不含用户数据的启动时间点；不要将 stdout 用作诊断日志，以免干扰 IPC。
+
 ## 下一阶段需补的回归风险
 
 - 手动刷新与定时触发交错时，仅产生一个有效抓取/通知结果；桌面单线程串行处理是现状，还应验证结果与去重。若 CLI 与桌面同时运行，需另测跨进程访问。
