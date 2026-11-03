@@ -25,6 +25,8 @@ React 页面 ← Tauri ← 按 id 对应的 JSON 响应 ← 查询/状态/设置
 
 Tauri 通过子进程 stdin/stdout 传输每行一条 JSON 消息；日志走 stderr，不开放本地 HTTP 端口。桌面服务拥有 SQLite 连接，手动抓取和定时抓取使用同一个 `refresh()`。单个长抓取会延后后续请求的响应。CLI 是另一种运行入口；若与桌面程序同时运行，当前没有跨进程调度锁。Phase 5 将来源状态写入 SQLite；新闻视图查询只读本地库，首页配额只影响返回的列表。Windows 开机启动由 Tauri 在当前用户的 Run 注册表项管理，启动参数 `--minimized` 隐藏主窗口。托盘和单实例仍由 Tauri 管理。
 
+Windows release 启动 Python 子进程时使用 `CREATE_NO_WINDOW`，保留 stdin/stdout 管道。Tauri setup 只创建子进程、读取本地窗口偏好并设置托盘；首个 `get_state` 由 React 在窗口显示后异步请求。子进程启动失败时保留空状态，前端显示错误并允许重试；进程退出后下一次命令可重新启动单个服务。
+
 ## 演进原则
 
 先审计并扩展现有 `FeedFetcher`、`Store`、`refresh()`、`DesktopService` 与 `NotificationService`。只有职责或现有接口确实无法覆盖需求时才增加服务、抽象或依赖。新增依赖、数据库结构变更、公共接口变更和较大重构，应在实施计划中逐项写明理由、兼容性与回退风险。Windows 打包与既有验证记录见 [phase4-desktop.md](phase4-desktop.md)。

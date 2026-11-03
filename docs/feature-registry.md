@@ -12,6 +12,7 @@
 | 桌面六页、搜索筛选、已读、设置保存 | 已实现 | `desktop/src/App.tsx`、`api.ts`、`desktop_service.py` | `test_desktop_service.py`；既有打包窗口检查见 `phase4-desktop.md` |
 | 桌面后台定时刷新、手动刷新共用单工作线程 | 已实现 | `desktop_service.py`、`pipeline.py` | `test_desktop_service.py` 覆盖单服务所有权；手动/定时交错的回归场景待补 |
 | Windows 托盘、关闭隐藏、单实例与子进程退出 | 已实现，待完整验收 | `desktop/src-tauri/src/main.rs` | 需按 `test-strategy.md` 在打包程序中验收 |
+| Windows 启动反馈、service 控制台抑制与连接重试 | 已实现，待安装验收 | `desktop/src-tauri/src/main.rs`、`desktop/src/App.tsx` | 打包 EXE 的冷/热启动、缺失 service 重试及进程退出已检查；干净账户安装仍待验证 |
 | Windows 原生通知及原文链接 | 已实现，待打包验收 | `notifications.py`、`pipeline.py` | `test_news.py`、`test_llm.py`；打包后显示与点击待验收 |
 | 旧库增量升级、已读状态 | 已实现，升级保障待补 | `storage.py` | `test_sources.py`、`test_desktop_service.py`；升级失败保留原库的验证待补 |
 | 开机启动 | 已实现，待登录场景验收 | `desktop/src-tauri/src/main.rs`、`desktop/src/App.tsx` | Rust 与 NSIS 构建通过；实际 Windows 重新登录待验 |

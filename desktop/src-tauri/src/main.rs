@@ -2,7 +2,11 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+#[cfg(all(windows, not(debug_assertions)))]
+use std::os::windows::process::CommandExt;
 use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
+use std::sync::OnceLock;
+use std::time::Instant;
 use tauri::{Emitter, Manager};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -32,12 +36,21 @@ impl Process {
 }
 
 struct Backend {
-    process: Arc<Mutex<Process>>,
+    process: Arc<Mutex<Option<Process>>>,
+    app: tauri::AppHandle,
     tray_on_close: AtomicBool,
     exiting: AtomicBool,
 }
 
-fn spawn_backend(app: &tauri::App) -> Result<Process, String> {
+fn startup_trace(stage: &str) {
+    if std::env::var_os("AI_NEWS_STARTUP_TRACE").is_some() {
+        static START: OnceLock<Instant> = OnceLock::new();
+        let start = START.get_or_init(Instant::now);
+        eprintln!("startup +{}ms {stage}", start.elapsed().as_millis());
+    }
+}
+
+fn spawn_backend(app: &tauri::AppHandle) -> Result<Process, String> {
     #[cfg(debug_assertions)]
     let mut cmd = {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -51,6 +64,8 @@ fn spawn_backend(app: &tauri::App) -> Result<Process, String> {
         let executable = app.path().resource_dir().map_err(|e| e.to_string())?.join("service/ai-news-service.exe");
         Command::new(executable)
     };
+    #[cfg(all(windows, not(debug_assertions)))]
+    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW; keep piped stdin/stdout for IPC.
     let mut child = cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null())
         .spawn().map_err(|e| format!("Could not start news service: {e}"))?;
     let stdin = child.stdin.take().ok_or("Backend stdin unavailable")?;
@@ -58,23 +73,51 @@ fn spawn_backend(app: &tauri::App) -> Result<Process, String> {
     Ok(Process { child, stdin, stdout: BufReader::new(stdout), next_id: 0 })
 }
 
+fn call_backend(app: &tauri::AppHandle, process: &Mutex<Option<Process>>, method: &str, params: serde_json::Value) -> Result<serde_json::Value, String> {
+    let mut guard = process.lock().map_err(|e| e.to_string())?;
+    if let Some(current) = guard.as_mut() {
+        if matches!(current.child.try_wait(), Ok(Some(_))) { *guard = None; }
+    }
+    if guard.is_none() { *guard = Some(spawn_backend(app)?); }
+    let result = guard.as_mut().expect("backend initialized").call(method, params);
+    if result.is_err() {
+        if let Some(current) = guard.as_mut() {
+            if matches!(current.child.try_wait(), Ok(Some(_))) { *guard = None; }
+        }
+    }
+    result
+}
+
+fn startup_preferences() -> (bool, bool) {
+    let prefs = std::env::var_os("LOCALAPPDATA")
+        .map(std::path::PathBuf::from)
+        .and_then(|base| std::fs::read(base.join("AI News Desktop/preferences.json")).ok())
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+    let tray_on_close = prefs.as_ref().and_then(|p| p["minimize_to_tray"].as_bool()).unwrap_or(true);
+    let start_minimized = prefs.as_ref().and_then(|p| p["start_minimized"].as_bool()).unwrap_or(false);
+    (tray_on_close, start_minimized)
+}
+
 #[tauri::command]
 async fn backend_command(state: tauri::State<'_, Backend>, method: String, params: serde_json::Value) -> Result<serde_json::Value, String> {
     let startup_change = if method == "save_preferences" { params.get("patch").and_then(|p| p.get("start_at_login")).and_then(|v| v.as_bool()) } else { None };
     let process = state.process.clone();
-    let result = tauri::async_runtime::spawn_blocking(move || process.lock().map_err(|e| e.to_string())?.call(&method, params))
+    let app = state.app.clone();
+    let trace_state = method == "get_state";
+    if trace_state { startup_trace("get_state request"); }
+    let result = tauri::async_runtime::spawn_blocking(move || call_backend(&app, &process, &method, params))
         .await.map_err(|e| e.to_string())??;
     if let Some(enabled) = startup_change {
         if let Err(error) = set_start_at_login(enabled) {
             let process = state.process.clone();
+            let app = state.app.clone();
             let _ = tauri::async_runtime::spawn_blocking(move || {
-                if let Ok(mut guard) = process.lock() {
-                    let _ = guard.call("save_preferences", serde_json::json!({"patch":{"start_at_login":!enabled}}));
-                }
+                let _ = call_backend(&app, &process, "save_preferences", serde_json::json!({"patch":{"start_at_login":!enabled}}));
             }).await;
             return Err(format!("Could not update Windows startup: {error}"));
         }
     }
+    if trace_state { startup_trace("get_state response"); }
     if let Some(preferences) = result.get("config").and_then(|c| c.get("preferences")) {
         if let Some(value) = preferences.get("minimize_to_tray").and_then(|v| v.as_bool()) {
             state.tray_on_close.store(value, Ordering::Relaxed);
@@ -88,9 +131,10 @@ async fn backend_command(state: tauri::State<'_, Backend>, method: String, param
 
 fn tray_call(app: &tauri::AppHandle, method: &str, params: serde_json::Value) {
     let process = app.state::<Backend>().process.clone();
+    let app = app.clone();
     let method = method.to_owned();
     tauri::async_runtime::spawn_blocking(move || {
-        if let Ok(mut guard) = process.lock() { let _ = guard.call(&method, params); }
+        let _ = call_backend(&app, &process, &method, params);
     });
 }
 
@@ -123,6 +167,7 @@ fn set_start_at_login(enabled: bool) -> Result<(), String> {
 fn set_start_at_login(_enabled: bool) -> Result<(), String> { Ok(()) }
 
 fn main() {
+    startup_trace("main");
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, args, _| {
             if !args.iter().any(|arg| arg == "--minimized") {
@@ -132,19 +177,14 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![backend_command])
         .setup(|app| {
-            let process = spawn_backend(app).map_err(std::io::Error::other)?;
-            app.manage(Backend { process: Arc::new(Mutex::new(process)), tray_on_close: AtomicBool::new(true), exiting: AtomicBool::new(false) });
-            if let Ok(mut service) = app.state::<Backend>().process.lock() {
-                if let Ok(snapshot) = service.call("get_state", serde_json::json!({})) {
-                    let prefs = &snapshot["config"]["preferences"];
-                    if let Some(value) = prefs["minimize_to_tray"].as_bool() {
-                        app.state::<Backend>().tray_on_close.store(value, Ordering::Relaxed);
-                    }
-                    if std::env::args().any(|arg| arg == "--minimized") || prefs["start_minimized"].as_bool() == Some(true) {
-                        if let Some(window) = app.get_webview_window("main") { let _ = window.hide(); }
-                    }
-                }
-            }
+            startup_trace("setup start");
+            let (tray_on_close, start_minimized) = startup_preferences();
+            let start_minimized = start_minimized || std::env::args().any(|arg| arg == "--minimized");
+            startup_trace(&format!("preferences loaded: tray_on_close={tray_on_close} start_minimized={start_minimized}"));
+            startup_trace("spawn backend start");
+            let process = spawn_backend(app.handle()).ok();
+            startup_trace("spawn backend complete");
+            app.manage(Backend { process: Arc::new(Mutex::new(process)), app: app.handle().clone(), tray_on_close: AtomicBool::new(tray_on_close), exiting: AtomicBool::new(false) });
             let show = MenuItem::with_id(app, "show", "显示窗口", true, None::<&str>)?;
             let refresh = MenuItem::with_id(app, "refresh", "立即更新", true, None::<&str>)?;
             let pause = MenuItem::with_id(app, "pause", "暂停 / 恢复监控", true, None::<&str>)?;
@@ -157,12 +197,11 @@ fn main() {
                     "refresh" => tray_call(app, "refresh", serde_json::json!({})),
                     "pause" => {
                         let process = app.state::<Backend>().process.clone();
+                        let app = app.clone();
                         tauri::async_runtime::spawn_blocking(move || {
-                            if let Ok(mut guard) = process.lock() {
-                                if let Ok(state) = guard.call("get_state", serde_json::json!({})) {
-                                    let enabled = !state["status"]["monitoring"].as_bool().unwrap_or(true);
-                                    let _ = guard.call("set_monitoring", serde_json::json!({"enabled": enabled}));
-                                }
+                            if let Ok(state) = call_backend(&app, &process, "get_state", serde_json::json!({})) {
+                                let enabled = !state["status"]["monitoring"].as_bool().unwrap_or(true);
+                                let _ = call_backend(&app, &process, "set_monitoring", serde_json::json!({"enabled": enabled}));
                             }
                         });
                     },
@@ -170,6 +209,12 @@ fn main() {
                     "exit" => { app.state::<Backend>().exiting.store(true, Ordering::Relaxed); app.exit(0); },
                     _ => {}
                 }).build(app)?;
+            if let Some(window) = app.get_webview_window("main") {
+                startup_trace(&format!("window before preference: {:?}", window.is_visible()));
+                if start_minimized { window.hide()?; } else { window.show()?; }
+                startup_trace(&format!("window after preference: {:?}", window.is_visible()));
+            }
+            startup_trace("setup complete");
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -183,9 +228,16 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("Could not create desktop application")
         .run(|app, event| {
+            if let tauri::RunEvent::Ready = event {
+                if let Some(window) = app.get_webview_window("main") {
+                    startup_trace(&format!("window at ready: {:?}", window.is_visible()));
+                }
+            }
             if let tauri::RunEvent::Exit = event {
                 let state = app.state::<Backend>();
-                if let Ok(mut process) = state.process.lock() { let _ = process.child.kill(); let _ = process.child.wait(); };
+                if let Ok(mut process) = state.process.lock() {
+                    if let Some(child) = process.as_mut() { let _ = child.child.kill(); let _ = child.child.wait(); }
+                };
             }
         });
 }

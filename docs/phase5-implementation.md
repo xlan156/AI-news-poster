@@ -19,3 +19,9 @@
 - 前端：TypeScript 检查与 Vite 生产构建通过。
 - Windows：`cargo check --locked --offline` 通过；开发窗口启动后 WebView 对本地 Vite 地址显示 `ERR_NETWORK_ACCESS_DENIED`。随后打开 release 可执行文件，实际检查首页、三种新闻视图、来源列表、通知页及设置页。现有用户库中官方视图 1461 篇、论文视图 407 篇、历史视图 2859 篇；没有触发网络抓取。重复启动后仍只有一个窗口；关闭主窗口后进程保持运行且窗口隐藏，符合托盘行为。
 - 打包：重建 PyInstaller sidecar 并通过独立 IPC 冒烟测试；Tauri release 和 NSIS 安装包构建成功，产物见 `desktop/src-tauri/target/release/bundle/nsis/AI News Desktop_0.4.0_x64-setup.exe`。安装、登录后开机启动、托盘菜单退出、通知出现和点击、休眠恢复及不同缩放比例仍需要实际 Windows 验收；尚不能据此创建版本标签或宣称 Phase 完成。
+
+## 启动 Hotfix 合并后回归（2026-11-03）
+
+已将 CI workspace 修复和 Windows 启动 Hotfix 合入 Phase 5 分支；冲突解决保留 `--minimized` 开机启动、设置失败回滚、无控制台 service 与异步首页加载。Python 回归为 50 passed、15 subtests passed，TypeScript、Vite 生产构建及 `cargo check --locked --offline` 通过。重建 Phase 5 的 PyInstaller service 后，Tauri release EXE 编译成功；本地 NSIS 阶段因无法解析 NSIS 下载主机而停止，需以该提交的 Windows CI 安装包构建结果为准。
+
+合并后的 release EXE 在本机显示首页和新闻视图，已有用户库中官方动态 1477 篇、研究论文 407 篇、全部历史 2875 篇，后台 service 无独立控制台窗口。未在本轮重新验证全新账户安装、登录后开机启动、托盘菜单退出、原生通知出现与点击、休眠恢复及不同缩放比例。

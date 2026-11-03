@@ -26,4 +26,6 @@ Phase 5 扩展：文章新增可空 `updated_at`（来源修订时间）和 `fet
 
 每条请求：`{"id": number, "method": string, "params": object}`；响应：`{"id": number, "result": value}` 或 `{"id": number, "error": string}`。方法为 `get_state`、`get_news`、`refresh`、`set_monitoring`、`set_read`、`save_config`、`save_preferences`、`test_connection`。具体请求/响应由 `desktop_service.py` 定义，前端类型在 `desktop/src/api.ts`；新增字段须两端同步。`refresh` 返回状态，状态中的 `last_result` 包含 `feeds_ok`、`feeds_failed`、`articles_added`、`notified`。`source_status` 从 SQLite 读取并跨进程重启保留。
 
-内部通知边界为 `NotificationService.send(NewsItem) -> None`；Windows 实现还支持多篇新闻分组发送。单条 toast 使用标题、摘要前 180 字和原始 URL 作为点击链接；分组 toast 点击第一篇的原文。当前没有持久化的通用“通知事件”总线或事件表。
+启动流程仍使用相同的 JSON 行协议。Tauri 不在 setup 中等待 `get_state`；前端首次异步请求期间显示加载状态，连接失败时展示错误并可重试。窗口初始可见性和关闭到托盘偏好由 Tauri 直接读取同一份 `preferences.json`，字段名与 Python 服务保持一致；`--minimized` 启动参数也会隐藏主窗口。
+
+内部通知边界以 `NotificationService.send(NewsItem) -> None` 为基础；Windows 实现还支持多篇新闻分组发送。单条 toast 使用标题、摘要前 180 字和原始 URL 作为点击链接；分组 toast 点击第一篇的原文。当前没有持久化的通用“通知事件”总线或事件表。
