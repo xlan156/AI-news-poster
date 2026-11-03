@@ -17,3 +17,7 @@ These project instructions apply to future work in this repository, including ne
 Use this order when applicable: focused checks → development-mode UI inspection → production frontend build → bundled executable/installer check. Skip stages that cannot reveal a relevant failure. Rebuild the Python sidecar only when Python code or its packaged dependencies changed. Rebuild the NSIS installer only when a deliverable or packaging check is needed.
 
 The Windows build procedure and remaining platform-specific checks are documented in [docs/phase4-desktop.md](docs/phase4-desktop.md). Keep that document current when build or verification steps change.
+
+## Phase planning and project source of truth
+
+Before a new Phase, read [docs/architecture.md](docs/architecture.md), [docs/feature-registry.md](docs/feature-registry.md), [docs/data-contracts.md](docs/data-contracts.md), and [docs/test-strategy.md](docs/test-strategy.md), then audit the current code and working tree. Requirements define goals and acceptance criteria; derive the implementation plan from that audit. Prefer extending existing components. Explain the reason and risk for new dependencies, database schema or public interface changes, and large refactors. Follow the five Phase gates and baseline/tag rules in `docs/test-strategy.md`; update the four documents as implementation changes.

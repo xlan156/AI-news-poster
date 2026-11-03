@@ -1,8 +1,8 @@
 # AI News Desktop Agent — AI Labs Sources
 
-> Phase 4 desktop UI and Windows build instructions: [docs/phase4-desktop.md](docs/phase4-desktop.md). The existing Python CLI remains available.
+> Current architecture and Phase planning: [architecture](docs/architecture.md), [feature registry](docs/feature-registry.md), [data contracts](docs/data-contracts.md), and [test strategy](docs/test-strategy.md). Desktop build and Windows verification: [docs/phase4-desktop.md](docs/phase4-desktop.md). The Python CLI remains available.
 
-A lightweight Windows 11 agent for official AI lab updates. It monitors OpenAI, Anthropic, DeepSeek, and Google DeepMind; stores articles in SQLite; suppresses first-run notifications; and sends at most three relevant native Windows toasts per refresh. Phase 3 adds optional cloud LLM analysis and Chinese summaries. The default is **LLM disabled**. The Phase 1 mock notification demo remains available. There is no GUI or always-on installer.
+A lightweight Windows 11 agent for official AI lab updates. It monitors OpenAI, Anthropic, DeepSeek, and Google DeepMind; stores articles in SQLite; suppresses first-run notifications; and sends at most three relevant native Windows toasts per refresh. Optional cloud LLM analysis and Chinese summaries are available; the default is **LLM disabled**. The Phase 1 mock notification demo remains available. Phase 4 added a Tauri/React desktop GUI and a Windows installer; see the documented packaged-app verification gaps before release.
 
 ## Requirements and installation (Windows 11)
 
