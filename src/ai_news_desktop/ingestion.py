@@ -51,22 +51,34 @@ def canonical_url(url: str) -> str:
 
 def parse_feed(content: bytes, feed: Feed) -> list[NewsItem]:
     parsed = feedparser.parse(content)
-    if parsed.bozo and not parsed.entries:
-        raise ValueError(f"malformed feed: {feed.name}: {parsed.bozo_exception}")
+    if not parsed.entries and (parsed.bozo or not parsed.version):
+        raise ValueError(f"malformed feed: {feed.name}: {parsed.bozo_exception}" if parsed.bozo else f"no entries found in {feed.name}")
+    if not parsed.entries:
+        return []
     items = []
     for entry in parsed.entries:
         try:
+            if feed.official_authors:
+                author = str(entry.get("author", "")).casefold().strip()
+                link_path = urlsplit(str(entry.get("link", ""))).path.casefold()
+                if not any(author == candidate.casefold() or link_path.startswith("/blog/" + candidate.casefold() + "/")
+                           for candidate in feed.official_authors):
+                    continue
             title = _plain_text(entry.get("title", ""))
             url = canonical_url(entry.get("link", ""))
-            stamp = entry.get("published_parsed") or entry.get("updated_parsed")
+            stamp = entry.get("published_parsed") or (entry.get("updated_parsed") if not feed.name.lower().startswith("arxiv") else None)
             if not title or not stamp:
                 raise ValueError("missing title or publication date")
             published = datetime.fromtimestamp(timegm(stamp), timezone.utc)
             summary = _plain_text(entry.get("summary") or entry.get("description") or "")[:500] or "Read the original article."
             identifier = hashlib.sha256(url.encode("utf-8")).hexdigest()
-            items.append(NewsItem(identifier, title, summary, feed.name, url, published, feed.organization or feed.name, classify(title, summary, feed.category)))
+            revision = entry.get("updated_parsed") if entry.get("updated") else None
+            updated = datetime.fromtimestamp(timegm(revision), timezone.utc) if revision else None
+            items.append(NewsItem(identifier, title, summary, feed.name, url, published, feed.organization or feed.name, classify(title, summary, feed.category), updated))
         except (ValueError, TypeError, OverflowError) as exc:
             logger.warning("Skipping malformed entry from %s: %s", feed.name, exc)
+    if not items and not feed.official_authors:
+        raise ValueError(f"no usable entries found in {feed.name}")
     return items
 
 

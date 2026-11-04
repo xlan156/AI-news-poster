@@ -2,9 +2,13 @@
 
 > Current architecture and Phase planning: [architecture](docs/architecture.md), [feature registry](docs/feature-registry.md), [data contracts](docs/data-contracts.md), and [test strategy](docs/test-strategy.md). Desktop build and Windows verification: [docs/phase4-desktop.md](docs/phase4-desktop.md). The Python CLI remains available.
 
-A lightweight Windows 11 agent for official AI lab updates. It monitors OpenAI, Anthropic, DeepSeek, and Google DeepMind; stores articles in SQLite; suppresses first-run notifications; and sends at most three relevant native Windows toasts per refresh. Optional cloud LLM analysis and Chinese summaries are available; the default is **LLM disabled**. The Phase 1 mock notification demo remains available. Phase 4 added a Tauri/React desktop GUI and a Windows installer; see the documented packaged-app verification gaps before release.
+A lightweight Windows 11 agent for official AI lab updates. It monitors OpenAI, Anthropic, DeepSeek, and Google DeepMind; stores articles in SQLite; suppresses first-run notifications; and sends at most three relevant native Windows toasts per refresh. Optional cloud LLM analysis and Chinese summaries are available; the default is **LLM disabled**. The Phase 1 mock notification demo remains available. Phase 5 adds official, research, and history views, source health, and configurable notification sources.
 
-## Requirements and installation (Windows 11)
+## Desktop installation (Windows 11)
+
+Download `AI News Desktop_0.5.0_x64-setup.exe` from [Releases](https://github.com/xlan156/AI-news-poster/releases) and run it. A desktop user does not need Python, Node.js, pnpm, or Rust. Windows 11 normally includes WebView2; the installer downloads it when absent. The installer is currently unsigned, so Windows may display a publisher warning. User news and settings remain in `%LOCALAPPDATA%\AI News Desktop` after uninstalling.
+
+## Python CLI installation (Windows 11)
 
 Use Python 3.11 or newer in a normal interactive desktop session. In PowerShell, from the repository root:
 

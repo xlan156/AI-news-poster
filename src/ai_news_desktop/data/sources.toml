@@ -5,7 +5,7 @@ max_article_age_hours = 48
 notifications_enabled = true
 
 [notifications]
-categories = ["model_release", "research", "api_update", "product_update"]
+categories = ["model_release", "research", "api_update", "product_update", "company_news"]
 exclude_keywords = ["partnership", "partner", "hiring", "careers", "recruitment", "sponsorship", "conference", "event"]
 
 [llm]
@@ -64,4 +64,29 @@ organization = "Google DeepMind"
 type = "rss"
 url = "https://deepmind.google/blog/rss.xml"
 enabled = true
+category = "research"
+
+[[sources]]
+name = "Google Research Blog"
+organization = "Google Research"
+type = "rss"
+url = "https://research.google/blog/rss/"
+enabled = false
+category = "research"
+
+[[sources]]
+name = "Hugging Face Official Blog"
+organization = "Hugging Face"
+type = "rss"
+url = "https://huggingface.co/blog/feed.xml"
+enabled = false
+category = "company_news"
+official_authors = ["huggingface"]
+
+[[sources]]
+name = "arXiv cs.AI"
+organization = "arXiv"
+type = "atom"
+url = "https://export.arxiv.org/api/query?search_query=cat:cs.AI&sortBy=submittedDate&sortOrder=descending&max_results=100"
+enabled = false
 category = "research"

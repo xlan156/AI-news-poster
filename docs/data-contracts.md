@@ -18,8 +18,14 @@ TOML 的 `[[sources]]` 必填 `name`、`organization`、`type`、`url`、`enable
 
 ## 桌面 IPC 与通知
 
-每条请求：`{"id": number, "method": string, "params": object}`；响应：`{"id": number, "result": value}` 或 `{"id": number, "error": string}`。方法为 `get_state`、`get_news`、`refresh`、`set_monitoring`、`set_read`、`save_config`、`save_preferences`、`test_connection`。具体请求/响应由 `desktop_service.py` 定义，前端类型在 `desktop/src/api.ts`；新增字段须两端同步。`refresh` 返回状态，状态中的 `last_result` 包含 `feeds_ok`、`feeds_failed`、`articles_added`、`notified`。`source_status` 记录本进程内的来源尝试结果，重启后不保留。
+Phase 5 扩展：文章新增可空 `updated_at`（来源修订时间）和 `fetched_at`（本地首次抓取时间）。旧行的 `fetched_at` 从 `first_seen_at` 补齐，旧库升级前生成一次 `.pre-phase5.bak` 备份。缺少来源日期的条目会记录解析警告并跳过，不会把抓取时间伪装成发布日期。只提供更新时间的非 arXiv Atom/RSS 条目使用该来源时间作排序日期，并同时保留 `updated_at`；arXiv 要求初次发布日期，修订只更新 `updated_at`。来源可配置 `official_authors`；Hugging Face 默认只接受 `huggingface` 署名或组织博客路径。
 
-启动流程仍使用相同的 JSON 行协议。Tauri 不在 setup 中等待 `get_state`；前端首次异步请求期间显示加载状态，连接失败时展示错误并可重试。窗口初始可见性和关闭到托盘偏好由 Tauri 直接读取同一份 `preferences.json`，字段名与 Python 服务保持一致。
+`source_status` 表以来源 URL 为键保存 `last_attempt`、`last_success`、`state`、`last_error`、`articles_added`。`get_news` 增加 `view`（`official`、`research`、`history`）和 `recommended` 排序。官方视图仅返回当前启用的非 arXiv 来源，论文视图返回 arXiv，历史视图不受停用影响。首页按 `home_source_quota` 轮流展示来源；完整查询无配额。推荐分数为类别权重（模型发布 4、API 更新 3、研究 2、产品更新 1、其他 0）乘 7，再加至多 30 天的新近分；同分按发布时间和 ID 倒序。`newest` 按发布时间倒序，缺失时回退到 `fetched_at`。
 
-内部通知边界只有 `NotificationService.send(NewsItem) -> None`。Windows toast 使用标题、摘要前 180 字和原始 URL 作为点击链接。当前没有持久化的通用“通知事件”总线或事件表；若未来需要每日摘要或通知历史，应先明确事件语义和迁移方式，再扩展现有边界。
+配置新增 `home_source_quota`、`default_view`、`default_sort`；通知设置新增 `sources`（空数组表示所有启用来源，`["__none__"]` 表示都不提醒）和 `research`。偏好 `start_at_login` 由 Tauri 同步到当前用户的 Windows Run 项。旧设置和文章保留。
+
+每条请求：`{"id": number, "method": string, "params": object}`；响应：`{"id": number, "result": value}` 或 `{"id": number, "error": string}`。方法为 `get_state`、`get_news`、`refresh`、`set_monitoring`、`set_read`、`save_config`、`save_preferences`、`test_connection`。具体请求/响应由 `desktop_service.py` 定义，前端类型在 `desktop/src/api.ts`；新增字段须两端同步。`refresh` 返回状态，状态中的 `last_result` 包含 `feeds_ok`、`feeds_failed`、`articles_added`、`notified`。`source_status` 从 SQLite 读取并跨进程重启保留。
+
+启动流程仍使用相同的 JSON 行协议。Tauri 不在 setup 中等待 `get_state`；前端首次异步请求期间显示加载状态，连接失败时展示错误并可重试。窗口初始可见性和关闭到托盘偏好由 Tauri 直接读取同一份 `preferences.json`，字段名与 Python 服务保持一致；`--minimized` 启动参数也会隐藏主窗口。
+
+内部通知边界以 `NotificationService.send(NewsItem) -> None` 为基础；Windows 实现还支持多篇新闻分组发送。单条 toast 使用标题、摘要前 180 字和原始 URL 作为点击链接；分组 toast 点击第一篇的原文。当前没有持久化的通用“通知事件”总线或事件表。

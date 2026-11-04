@@ -21,8 +21,9 @@ FIXTURES = Path(__file__).parent / "fixtures"
 class SourceTests(unittest.TestCase):
     def test_default_sources(self):
         config = load_config()
-        self.assertEqual({source.organization for source in config.feeds}, {"OpenAI", "Anthropic", "DeepSeek", "Google DeepMind"})
-        self.assertEqual({source.type for source in config.feeds}, {"rss", "webpage"})
+        self.assertEqual({source.organization for source in config.feeds}, {"OpenAI", "Anthropic", "DeepSeek", "Google DeepMind", "Google Research", "Hugging Face", "arXiv"})
+        self.assertFalse(next(source for source in config.feeds if source.organization == "Hugging Face").enabled)
+        self.assertEqual({source.type for source in config.feeds}, {"rss", "atom", "webpage"})
 
     def test_source_toml_requires_metadata(self):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp:
@@ -41,6 +42,25 @@ class SourceTests(unittest.TestCase):
         with patch("ai_news_desktop.ingestion.httpx.Client") as client:
             client.return_value.__enter__.return_value.get.return_value = response
             self.assertEqual(len(RSSAdapter().fetch(openai)), 1)
+
+    def test_revision_metadata_and_official_hugging_face_filter(self):
+        source = Feed("Hugging Face Official Blog", "https://huggingface.co/blog/feed.xml",
+                      organization="Hugging Face", official_authors=("huggingface",))
+        xml = b'''<rss version="2.0"><channel><title>Blog</title>
+        <item><title>Official release</title><link>https://huggingface.co/blog/huggingface/release</link>
+        <author>huggingface</author><pubDate>Mon, 02 Nov 2026 10:00:00 GMT</pubDate></item>
+        <item><title>Community post</title><link>https://huggingface.co/blog/person/post</link>
+        <author>person</author><pubDate>Mon, 02 Nov 2026 11:00:00 GMT</pubDate></item>
+        </channel></rss>'''
+        items = parse_feed(xml, source)
+        self.assertEqual([item.title for item in items], ["Official release"])
+        atom = b'''<feed xmlns="http://www.w3.org/2005/Atom"><title>arXiv</title>
+        <entry><title>Paper</title><id>https://arxiv.org/abs/1234.5678</id>
+        <link href="https://arxiv.org/abs/1234.5678"/>
+        <published>2026-10-01T10:00:00Z</published><updated>2026-11-02T12:00:00Z</updated></entry></feed>'''
+        paper = parse_feed(atom, Feed("arXiv", "https://example.com/atom"))[0]
+        self.assertEqual(paper.published_at.date().isoformat(), "2026-10-01")
+        self.assertEqual(paper.updated_at.date().isoformat(), "2026-11-02")
 
     def test_webpage_fixtures_and_robots(self):
         anthropic = Feed("Anthropic", "https://www.anthropic.com/news", organization="Anthropic", type="webpage", card_tag="li", card_attribute="data-listing-row", link_prefix="/news/")
@@ -104,7 +124,23 @@ class SourceTests(unittest.TestCase):
             db.close()
             store = Store(path)
             columns = {row[1] for row in store.db.execute("PRAGMA table_info(articles)")}
-            self.assertTrue({"organization", "category", "dedupe_key"}.issubset(columns))
+            self.assertTrue({"organization", "category", "dedupe_key", "updated_at", "fetched_at"}.issubset(columns))
+            self.assertTrue(path.with_suffix(".sqlite3.pre-phase5.bak").exists())
+            store.close()
+
+    def test_revision_preserves_initial_publication(self):
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp:
+            store = Store(Path(temp) / "news.sqlite3")
+            initial = NewsItem("v1", "Paper", "Abstract", "arXiv cs.AI", "https://arxiv.org/abs/1234.5678v1",
+                               datetime(2026, 10, 1, tzinfo=timezone.utc), "arXiv", "research")
+            revised = NewsItem("v2", "Paper", "Abstract", "arXiv cs.AI", "https://arxiv.org/abs/1234.5678v2",
+                               initial.published_at, "arXiv", "research", datetime(2026, 11, 2, tzinfo=timezone.utc))
+            store.save_feed("arxiv", [initial])
+            self.assertEqual(store.save_feed("arxiv", [revised]), 0)
+            row = store.latest(1)[0]
+            self.assertEqual(row["published_at"], initial.published_at.isoformat())
+            self.assertEqual(row["updated_at"], revised.updated_at.isoformat())
+            self.assertIsNotNone(row["fetched_at"])
             store.close()
 
     def test_model_release_precedes_research_under_limit(self):

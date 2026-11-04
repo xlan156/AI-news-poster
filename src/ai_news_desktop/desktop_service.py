@@ -31,7 +31,8 @@ def public_config(config: Config, prefs: dict) -> dict:
     value = asdict(config)
     value["sources"] = value.pop("feeds")
     value["notifications"] = {"categories": value.pop("notification_categories"),
-                              "exclude_keywords": value.pop("exclude_keywords")}
+                              "exclude_keywords": value.pop("exclude_keywords"),
+                              "sources": value.pop("notification_sources"), "research": value.pop("research_notifications")}
     value["llm"]["has_api_key"] = value["llm"]["api_key_ref"].startswith("keyring:")
     value["llm"].pop("api_key_ref")
     value["preferences"] = prefs
@@ -42,7 +43,8 @@ def config_json(config: Config) -> dict:
     value = asdict(config)
     value["sources"] = value.pop("feeds")
     value["notifications"] = {"categories": value.pop("notification_categories"),
-                              "exclude_keywords": value.pop("exclude_keywords")}
+                              "exclude_keywords": value.pop("exclude_keywords"),
+                              "sources": value.pop("notification_sources"), "research": value.pop("research_notifications")}
     return value
 
 
@@ -67,13 +69,21 @@ class DesktopService:
         self.config_file = data_dir / "desktop.json"
         self.prefs_file = data_dir / "preferences.json"
         self.config = load_config(self.config_file if self.config_file.exists() else None)
+        if self.config_file.exists():
+            optional_urls = {"https://research.google/blog/rss/", "https://huggingface.co/blog/feed.xml",
+                             "https://export.arxiv.org/api/query?search_query=cat:cs.AI&sortBy=submittedDate&sortOrder=descending&max_results=100"}
+            existing = {feed.url for feed in self.config.feeds}
+            additions = tuple(feed for feed in load_config().feeds if feed.url in optional_urls and feed.url not in existing)
+            if additions:
+                self.config = replace(self.config, feeds=self.config.feeds + additions)
         self.prefs = {**DEFAULT_PREFS, **(json.loads(self.prefs_file.read_text(encoding="utf-8")) if self.prefs_file.exists() else {})}
         self.store = Store(data_dir / "news.sqlite3")
         self.monitoring = True
-        self.last_refresh = None
+        self.source_status = self.store.source_status()
+        successes = [state["last_success"] for state in self.source_status.values() if state["last_success"]]
+        self.last_refresh = max(successes) if successes else None
         self.last_result = None
         self.next_refresh = datetime.now().astimezone() + timedelta(minutes=self.config.refresh_minutes)
-        self.source_status = {}
 
     def close(self):
         self.store.close()
@@ -130,7 +140,8 @@ class DesktopService:
                     raise
 
         result = refresh(config, self.store, TrackingFetcher(),
-                         notify=self.monitoring and not source_url and not in_quiet_hours(self.prefs))
+                         notify=not in_quiet_hours(self.prefs))
+        self.source_status = self.store.source_status()
         now = datetime.now().astimezone()
         if result.feeds_ok:
             self.last_refresh = now.isoformat()
@@ -141,15 +152,21 @@ class DesktopService:
     def dispatch(self, method: str, params: dict):
         if method == "get_state":
             return {"status": self.status(), "config": public_config(self.config, self.prefs),
-                    "articles": self.articles()}
+                    "articles": self.articles(self.store.search_news(sort=self.config.default_sort, limit=20,
+                        view=self.config.default_view, enabled_sources=tuple(feed.name for feed in self.config.feeds if feed.enabled),
+                        quota=self.config.home_source_quota if self.config.default_view == "official" else 0)[0])}
         if method == "get_news":
             search = str(params.get("search", ""))[:200]
             organization = str(params.get("organization", "all"))[:200]
             category = str(params.get("category", "all"))[:100]
             sort = str(params.get("sort", "newest"))
+            view = str(params.get("view", "history"))
+            if view not in {"official", "research", "history"} or sort not in {"recommended", "newest", "oldest"}:
+                raise ValueError("Invalid news view or sorting")
             limit = max(1, min(int(params.get("limit", 100)), 100))
             offset = max(0, int(params.get("offset", 0)))
-            rows, total = self.store.search_news(search, organization, category, sort, limit, offset)
+            rows, total = self.store.search_news(search, organization, category, sort, limit, offset,
+                view=view, enabled_sources=tuple(feed.name for feed in self.config.feeds if feed.enabled))
             return {"items": self.articles(rows), "total": total,
                     "organizations": self.store.organizations()}
         if method == "test_connection":
@@ -171,7 +188,7 @@ class DesktopService:
         if method == "save_config":
             raw = config_json(self.config)
             patch = params.get("patch", {})
-            allowed = {"refresh_minutes", "max_notifications_per_cycle", "notifications_enabled", "llm", "news_filter", "notifications", "sources"}
+            allowed = {"refresh_minutes", "max_notifications_per_cycle", "notifications_enabled", "home_source_quota", "default_view", "default_sort", "llm", "news_filter", "notifications", "sources"}
             if not isinstance(patch, dict) or set(patch) - allowed:
                 raise ValueError("Invalid configuration fields")
             for key, value in patch.items():
@@ -195,6 +212,8 @@ class DesktopService:
                 keyring.set_password("AI News Desktop", "llm", key)
             atomic_json(self.config_file, raw)
             self.config = validated
+            if "refresh_minutes" in patch:
+                self.next_refresh = datetime.now().astimezone() + timedelta(minutes=self.config.refresh_minutes)
             return public_config(self.config, self.prefs)
         if method == "save_preferences":
             patch = params.get("patch", {})

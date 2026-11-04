@@ -20,9 +20,13 @@ pnpm build
 
 `pnpm build` 包含 TypeScript 检查。前端交互变更可追加有意义的组件测试与开发窗口检查；打包或 Windows 行为变更按 [phase4-desktop.md](phase4-desktop.md) 构建并运行程序。CI 的 `windows-desktop.yml` 已运行 Python 测试并产出 NSIS 安装包，但产出安装包不等于自动完成 Windows 端到端验收。
 
+发布候选还需核对版本号与安装包来源，备份并移开现有 `%LOCALAPPDATA%\AI News Desktop` 数据后测试首次安装、启动、默认设置和卸载保留数据；测试结束恢复原数据。该流程仍在原 Windows 账户执行，不等同于独立账户或全新机器验收。
+
 Windows 启动行为变更还应在 release EXE 中记录冷/热启动到可见加载提示及首页内容的时间，确认后台 service 无控制台窗口、连接失败可重试、最小化启动不显示主窗口，并在正常退出时检查子进程清理。`AI_NEWS_STARTUP_TRACE=1` 可在桌面进程 stderr 输出不含用户数据的启动时间点；不要将 stdout 用作诊断日志，以免干扰 IPC。
 
 ## 下一阶段需补的回归风险
+
+Phase 5 回归入口：`python -m pytest -q --basetemp .pytest-phase5`（测试临时库放工作区，避免受限临时目录）、`desktop/node_modules/.bin/tsc -b`、`desktop/node_modules/.bin/vite build`、`cargo check --locked`。手动与定时请求由同一个服务工作线程串行；来源状态、官方/论文/历史视图、配额、旧库升级和来源作者筛选由模拟数据测试。Windows 开机启动仍需真实登录后检查 Run 项、隐藏窗口与单实例；原生 toast 的出现和点击需要打包应用验收。
 
 - 手动刷新与定时触发交错时，仅产生一个有效抓取/通知结果；桌面单线程串行处理是现状，还应验证结果与去重。若 CLI 与桌面同时运行，需另测跨进程访问。
 - 数据库升级：用上一版本真实结构的副本测试保留文章、通知及已读数据；模拟迁移失败并核对原始数据仍可读取，再决定是否需要备份或事务调整。

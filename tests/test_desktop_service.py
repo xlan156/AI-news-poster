@@ -3,11 +3,14 @@ import json
 import os
 import subprocess
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
+from unittest.mock import Mock
 
 import pytest
 
 from ai_news_desktop.desktop_service import DesktopService, in_quiet_hours
+from ai_news_desktop.models import NewsItem
+from ai_news_desktop.pipeline import refresh
 
 
 def test_desktop_state_and_read_flag(tmp_path):
@@ -36,9 +39,11 @@ def test_news_search_covers_all_rows_and_legacy_source(tmp_path):
                   "2026-01-01T00:00:00+00:00", "baseline") for i in range(120)],
             )
         state = service.dispatch("get_state", {})
-        assert len(state["articles"]) == 20
-        assert state["articles"][0]["organization"] == "arXiv"
-        assert state["articles"][0]["category"] == "research"
+        assert state["articles"] == []  # Official Updates excludes stored papers.
+        papers = service.dispatch("get_news", {"view": "research"})
+        assert papers["total"] == 120
+        assert papers["items"][0]["organization"] == "arXiv"
+        assert papers["items"][0]["category"] == "research"
         first = service.dispatch("get_news", {"limit": 100})
         assert first["total"] == 120
         assert len(first["items"]) == 100
@@ -69,6 +74,48 @@ def test_settings_round_trip_and_validation(tmp_path):
     try:
         assert reopened.config.refresh_minutes == 30
         assert reopened.prefs["quiet_start"] == "23:00"
+    finally:
+        reopened.close()
+
+
+def test_phase5_settings_survive_restart(tmp_path):
+    service = DesktopService(tmp_path)
+    try:
+        service.dispatch("save_config", {"patch": {"refresh_minutes": 120, "home_source_quota": 2,
+            "default_view": "history", "default_sort": "newest",
+            "notifications": {"research": True, "sources": ["__none__"]}}})
+        service.dispatch("save_preferences", {"patch": {"start_at_login": True}})
+    finally:
+        service.close()
+    reopened = DesktopService(tmp_path)
+    try:
+        config = reopened.dispatch("get_state", {})["config"]
+        assert (config["refresh_minutes"], config["home_source_quota"], config["default_view"]) == (120, 2, "history")
+        assert config["notifications"]["research"] is True
+        assert tuple(config["notifications"]["sources"]) == ("__none__",)
+        assert config["preferences"]["start_at_login"] is True
+    finally:
+        reopened.close()
+
+
+def test_source_failure_isolated_from_empty_success(tmp_path):
+    service = DesktopService(tmp_path)
+    try:
+        active = [feed for feed in service.config.feeds if feed.enabled][:2]
+        fetcher = Mock()
+        fetcher.fetch.side_effect = [RuntimeError("timeout"), []]
+        result = refresh(service.config.__class__(feeds=tuple(active)), service.store, fetcher)
+        assert (result.feeds_ok, result.feeds_failed, result.articles_added) == (1, 1, 0)
+        status = service.store.source_status()
+        assert status[active[0].url]["state"] == "error"
+        assert status[active[0].url]["last_error"] == "timeout"
+        assert status[active[1].url]["state"] == "ok"
+        assert status[active[1].url]["articles_added"] == 0
+    finally:
+        service.close()
+    reopened = DesktopService(tmp_path)
+    try:
+        assert reopened.status()["source_status"][active[0].url]["state"] == "error"
     finally:
         reopened.close()
 
@@ -118,3 +165,40 @@ def test_json_line_ipc_round_trip(tmp_path):
         if process.stdin:
             process.stdin.close()
         process.wait(timeout=5)
+
+
+def test_phase5_views_quota_and_persistent_source_health(tmp_path):
+    service = DesktopService(tmp_path)
+    try:
+        sources = service.config.feeds
+        openai, anthropic = sources[:2]
+        for feed in (openai, anthropic):
+            service.store.save_feed(feed.url, [])
+        stamp = datetime(2026, 11, 1, tzinfo=timezone.utc)
+        for i in range(6):
+            service.store.save_feed(openai.url, [NewsItem(f"o{i}", f"OpenAI {i}", "Summary", openai.name,
+                f"https://example.com/o{i}", stamp, openai.organization)])
+        service.store.save_feed(anthropic.url, [NewsItem("a", "Anthropic", "Summary", anthropic.name,
+            "https://example.com/a", stamp, anthropic.organization)])
+        service.store.save_feed("arxiv", [NewsItem("r", "Paper", "Summary", "arXiv",
+            "https://example.com/r", stamp, "arXiv", "research")])
+        service.store.set_source_status(openai.url, "ok", 6)
+        home = service.dispatch("get_state", {})["articles"]
+        assert len(home) == 4
+        assert sum(a["source"] == openai.name for a in home) == 3
+        assert service.dispatch("get_news", {"view": "history"})["total"] == 8
+        assert service.dispatch("get_news", {"view": "research"})["total"] == 1
+        service.dispatch("save_config", {"patch": {"sources": [
+            {**feed, "enabled": False} if feed["url"] == openai.url else feed
+            for feed in service.dispatch("get_state", {})["config"]["sources"]]}})
+        assert service.dispatch("get_news", {"view": "official"})["total"] == 1
+        assert service.dispatch("get_news", {"view": "history", "search": "OpenAI"})["total"] == 6
+    finally:
+        service.close()
+    reopened = DesktopService(tmp_path)
+    try:
+        assert reopened.status()["source_status"][openai.url]["articles_added"] == 6
+        assert reopened.status()["last_refresh"] is not None
+        assert reopened.dispatch("get_news", {"view": "history"})["total"] == 8
+    finally:
+        reopened.close()

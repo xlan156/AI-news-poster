@@ -23,9 +23,9 @@ React 页面 → Tauri backend_command → 单个 Python desktop_service → ref
 React 页面 ← Tauri ← 按 id 对应的 JSON 响应 ← 查询/状态/设置
 ```
 
-Tauri 通过子进程 stdin/stdout 传输每行一条 JSON 消息；日志走 stderr，不开放本地 HTTP 端口。桌面服务拥有 SQLite 连接，手动抓取和定时抓取使用同一个 `refresh()`。单个长抓取会延后后续请求的响应。CLI 是另一种运行入口；若与桌面程序同时运行，当前没有跨进程调度锁，下一阶段涉及并发抓取时要专门审计。
+Tauri 通过子进程 stdin/stdout 传输每行一条 JSON 消息；日志走 stderr，不开放本地 HTTP 端口。桌面服务拥有 SQLite 连接，手动抓取和定时抓取使用同一个 `refresh()`。单个长抓取会延后后续请求的响应。CLI 是另一种运行入口；若与桌面程序同时运行，当前没有跨进程调度锁。Phase 5 将来源状态写入 SQLite；新闻视图查询只读本地库，首页配额只影响返回的列表。Windows 开机启动由 Tauri 在当前用户的 Run 注册表项管理，启动参数 `--minimized` 隐藏主窗口。托盘和单实例仍由 Tauri 管理。
 
-Windows release 启动 Python 子进程时使用 `CREATE_NO_WINDOW`，保留 stdin/stdout 管道。Tauri setup 只创建子进程、读取本地窗口偏好并设置托盘；首个 `get_state` 由 React 在窗口显示后异步请求。子进程启动失败时保留空状态，前端显示错误并允许重试；进程退出后下一次命令可重新启动单个服务。
+Windows release 启动 Python 子进程时使用 `CREATE_NO_WINDOW`，保留 stdin/stdout 管道。Tauri setup 只创建子进程、读取本地窗口偏好并设置托盘；首个 `get_state` 由 React 在窗口显示后异步请求。子进程启动失败时保留空状态，前端显示错误并允许重试；进程退出后下一次命令可重新启动单个服务。当前 NSIS 用户级安装目录也在 `%LOCALAPPDATA%\AI News Desktop`；卸载器删除程序文件并保留 SQLite 与偏好文件。
 
 ## 演进原则
 

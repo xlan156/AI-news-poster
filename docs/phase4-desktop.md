@@ -36,7 +36,7 @@ pnpm build
 pnpm tauri build
 ```
 
-The installer is at `desktop/src-tauri/target/release/bundle/nsis/AI News Desktop_0.4.0_x64-setup.exe`. It was built locally on Windows 11 after installing Rust and Microsoft C++ Build Tools. The project uses Tauri's `downloadBootstrapper` WebView2 mode. Windows 11 normally includes WebView2; if it is absent, the installer needs internet access to download it. See [Tauri's Windows installer guide](https://v2.tauri.app/distribute/windows-installer/). An unsigned installer may show a Windows SmartScreen warning.
+The 0.5.0 release candidate installer is at `desktop/src-tauri/target/release/bundle/nsis/AI News Desktop_0.5.0_x64-setup.exe` after a successful build. The project uses Tauri's `downloadBootstrapper` WebView2 mode. Windows 11 normally includes WebView2; if it is absent, the installer needs internet access to download it. See [Tauri's Windows installer guide](https://v2.tauri.app/distribute/windows-installer/). An unsigned installer may show a Windows SmartScreen warning.
 
 ## Windows verification
 
@@ -48,6 +48,10 @@ The final packaged EXE showed a retry control for a missing service in about 0.6
 
 Further Windows verification required:
 
+Phase 5 补充：开机启动使用 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 的 `AI News Desktop` 项和 `--minimized` 参数。验收时在设置中开关后检查该项，并在重新登录后确认托盘启动、单实例与退出。新增官方/论文/历史视图、来源健康、分组通知和论文提醒也应在打包应用中核对。Python 变更时先重建并复制 sidecar，再构建 NSIS；前端迭代可直接运行 `desktop/node_modules/.bin/tsc -b` 与 `vite build`，无需每次制作安装包。
+
+2026-11-03 Phase 5 构建记录：重建 sidecar、TypeScript/Vite 检查及 NSIS 打包均通过；release 可执行文件在 Windows 11 上启动并检查首页、三视图、来源、通知与设置页。安装包尚未在干净账户安装，开机启动、原生通知点击、托盘退出及休眠恢复仍待端到端验收。
+
 - Install and launch on a clean Windows 11 account with no Python or Node.js.
 - Verify the packaged Python service starts, exits with the GUI, and leaves no orphan process.
 - Verify close-to-tray, tray Show/Refresh/Pause/Settings/Exit, and single-instance behavior.
@@ -57,4 +61,4 @@ Further Windows verification required:
 
 ## Known gaps
 
-The installer and bundled Python service were built locally, and the installer was extracted to verify that it contains both executables. The Python service exe passed an IPC startup/shutdown smoke test. Start-at-login, daily digest, log viewer, language switching, and persisted per-source error history are not implemented. Start-at-login and the log viewer are labelled as pending in the UI. The overview's last successful refresh also resets on application restart. Custom RSS sources can be added; custom webpage adapters require editing configuration. The Python native toast implementation needs validation from the packaged executable before a public release.
+The installer and bundled Python service were built locally, and the installer was extracted to verify that it contains both executables. The Python service exe passed an IPC startup/shutdown smoke test. Start-at-login is implemented but still needs a real sign-in test. Daily digest, log viewer, language switching, and persisted per-source error history are not implemented. The overview's last successful refresh also resets on application restart. Custom RSS sources can be added; custom webpage adapters require editing configuration. The Python native toast implementation still needs validation from the installed application.
