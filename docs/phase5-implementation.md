@@ -25,3 +25,7 @@
 已将 CI workspace 修复和 Windows 启动 Hotfix 合入 Phase 5 分支；冲突解决保留 `--minimized` 开机启动、设置失败回滚、无控制台 service 与异步首页加载。Python 回归为 50 passed、15 subtests passed，TypeScript、Vite 生产构建及 `cargo check --locked --offline` 通过。重建 Phase 5 的 PyInstaller service 后，Tauri release EXE 编译成功；本地 NSIS 阶段因无法解析 NSIS 下载主机而停止，需以该提交的 Windows CI 安装包构建结果为准。
 
 合并后的 release EXE 在本机显示首页和新闻视图，已有用户库中官方动态 1477 篇、研究论文 407 篇、全部历史 2875 篇，后台 service 无独立控制台窗口。未在本轮重新验证全新账户安装、登录后开机启动、托盘菜单退出、原生通知出现与点击、休眠恢复及不同缩放比例。
+
+## 0.5.0 发布候选验证（2026-11-04）
+
+发布前将 Python、Tauri、Rust、前端及界面显示的版本统一为 `0.5.0`。在原 Windows 11 账户中备份并移开原有约 4.7 MB 用户数据，安装由 GitHub Actions 提交 `83278c7` 生成的 0.4.0 安装包作为首次安装基线。空库首次启动、默认官方视图、7 个预置来源（4 个启用、3 个关闭）、设置页及偏好持久化通过；窗口退出后没有遗留 service 进程。卸载后程序文件和卸载记录移除，SQLite 与偏好文件的 SHA-256 保持一致；测试数据已单独保存，原用户数据已恢复。该检查在有开发工具的同一 Windows 账户上进行，尚不能代表独立账户或全新机器。0.5.0 安装包仍需在 CI 构建并再次验收。

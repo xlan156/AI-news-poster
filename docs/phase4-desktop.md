@@ -36,7 +36,7 @@ pnpm build
 pnpm tauri build
 ```
 
-The installer is at `desktop/src-tauri/target/release/bundle/nsis/AI News Desktop_0.4.0_x64-setup.exe`. It was built locally on Windows 11 after installing Rust and Microsoft C++ Build Tools. The project uses Tauri's `downloadBootstrapper` WebView2 mode. Windows 11 normally includes WebView2; if it is absent, the installer needs internet access to download it. See [Tauri's Windows installer guide](https://v2.tauri.app/distribute/windows-installer/). An unsigned installer may show a Windows SmartScreen warning.
+The 0.5.0 release candidate installer is at `desktop/src-tauri/target/release/bundle/nsis/AI News Desktop_0.5.0_x64-setup.exe` after a successful build. The project uses Tauri's `downloadBootstrapper` WebView2 mode. Windows 11 normally includes WebView2; if it is absent, the installer needs internet access to download it. See [Tauri's Windows installer guide](https://v2.tauri.app/distribute/windows-installer/). An unsigned installer may show a Windows SmartScreen warning.
 
 ## Windows verification
 
@@ -61,4 +61,4 @@ Phase 5 补充：开机启动使用 `HKCU\Software\Microsoft\Windows\CurrentVers
 
 ## Known gaps
 
-The installer and bundled Python service were built locally, and the installer was extracted to verify that it contains both executables. The Python service exe passed an IPC startup/shutdown smoke test. Start-at-login, daily digest, log viewer, language switching, and persisted per-source error history are not implemented. Start-at-login and the log viewer are labelled as pending in the UI. The overview's last successful refresh also resets on application restart. Custom RSS sources can be added; custom webpage adapters require editing configuration. The Python native toast implementation needs validation from the packaged executable before a public release.
+The installer and bundled Python service were built locally, and the installer was extracted to verify that it contains both executables. The Python service exe passed an IPC startup/shutdown smoke test. Start-at-login is implemented but still needs a real sign-in test. Daily digest, log viewer, language switching, and persisted per-source error history are not implemented. The overview's last successful refresh also resets on application restart. Custom RSS sources can be added; custom webpage adapters require editing configuration. The Python native toast implementation still needs validation from the installed application.
